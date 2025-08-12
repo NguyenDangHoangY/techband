@@ -1,8 +1,9 @@
+// @ts-ignore
 import React from "react";
 import { ChakraProvider } from "@chakra-ui/react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import SongListPage from "./pages/SongListPage";
-import SongAddPage from "./pages/SongAddPage";
+import SongListPage from "./pages/SongListPage.js";
+import SongAddPage from "./pages/SongAddPage.js";
 import theme from "./theme";
 
 function App() {
