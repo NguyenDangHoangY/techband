@@ -52,7 +52,6 @@ function getAcronym(str) {
     .join("");
 }
 
-// Swipe (drag) detection constants
 const MIN_SWIPE_DISTANCE = 50; // px
 
 export default function SongListPage() {
@@ -68,7 +67,6 @@ export default function SongListPage() {
   const searchRef = useRef();
 
   const [editMode, setEditMode] = useState(false);
-  // For swipe detection
   const swipeStartXRef = useRef(null);
   const swipeActiveRowRef = useRef(null);
 
@@ -88,10 +86,11 @@ export default function SongListPage() {
     md: "200px",
     lg: "220px",
   });
+  // THU HẸP TEMPO COLUMN: giảm width xuống
   const tempoColWidth = useBreakpointValue({
-    base: "20vw",
-    md: "90px",
-    lg: "110px",
+    base: "14vw",
+    md: "64px",
+    lg: "80px",
   });
   const iconColWidth = useBreakpointValue({
     base: "36px",
@@ -113,7 +112,6 @@ export default function SongListPage() {
     }, [activeSongId]),
   });
 
-  // Lấy danh sách bài hát
   useEffect(() => {
     const fetchSongs = async () => {
       setLoading(true);
@@ -128,7 +126,6 @@ export default function SongListPage() {
     fetchSongs();
   }, []);
 
-  // Lắng nghe trạng thái đồng bộ hệ thống
   useEffect(() => {
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
     const unsubscribe = onSnapshot(systemStateRef, (snap) => {
@@ -148,7 +145,6 @@ export default function SongListPage() {
     return () => unsubscribe();
   }, []);
 
-  // Tắt metronome sau MAX_TICKS
   useEffect(() => {
     if (tickCount >= MAX_TICKS && activeSongId) {
       setActiveSongId(null);
@@ -157,9 +153,7 @@ export default function SongListPage() {
     }
   }, [tickCount, activeSongId]);
 
-  // Swipe handlers
   const handleSwipeStart = (e, songId) => {
-    // touchstart/mousedown
     let x = null;
     if (e.touches && e.touches.length > 0) {
       x = e.touches[0].clientX;
@@ -171,7 +165,6 @@ export default function SongListPage() {
   };
 
   const handleSwipeEnd = (e, songId) => {
-    // touchend/mouseup
     let x = null;
     if (e.changedTouches && e.changedTouches.length > 0) {
       x = e.changedTouches[0].clientX;
@@ -181,7 +174,6 @@ export default function SongListPage() {
     const startX = swipeStartXRef.current;
     swipeStartXRef.current = null;
 
-    // Only proceed if this is the same row
     if (swipeActiveRowRef.current !== songId) return;
     swipeActiveRowRef.current = null;
 
@@ -189,15 +181,12 @@ export default function SongListPage() {
     const deltaX = x - startX;
     if (Math.abs(deltaX) < MIN_SWIPE_DISTANCE) return;
     if (deltaX < 0) {
-      // Swipe left (bật edit mode)
       setEditMode(true);
     } else if (deltaX > 0) {
-      // Swipe right (tắt edit mode)
       setEditMode(false);
     }
   };
 
-  // Thoát edit mode khi click ngoài bảng
   useEffect(() => {
     if (!editMode) return;
     const handleClick = (e) => {
@@ -207,7 +196,6 @@ export default function SongListPage() {
     return () => window.removeEventListener("mousedown", handleClick);
   }, [editMode]);
 
-  // Lọc và sắp xếp bài hát
   const filteredSongs = songs.filter((song) => {
     if (!search.trim()) return true;
     const lower = search.trim().toLowerCase();
@@ -235,7 +223,6 @@ export default function SongListPage() {
       ),
   ];
 
-  // Pin bài hát
   const handlePinSong = async (song, e) => {
     e.stopPropagation();
     if (song.pinned) {
@@ -268,7 +255,6 @@ export default function SongListPage() {
     }
   };
 
-  // Xóa bài hát
   const handleDeleteSong = async (song, e) => {
     e.stopPropagation();
     if (!window.confirm(`Xoá bài "${song.name}"?`)) return;
@@ -282,7 +268,6 @@ export default function SongListPage() {
     });
   };
 
-  // Chọn/Tắt metronome (đồng bộ toàn hệ thống)
   const handleTempoClick = async (song) => {
     if (editMode) return;
     await ensureAudioReady();
@@ -303,13 +288,11 @@ export default function SongListPage() {
     }
   };
 
-  // Xem chi tiết bài hát
   const handleRowClick = (song) => {
     if (editMode) return;
     setModalSong(song);
   };
 
-  // Handler for clearing search
   const handleClearSearch = () => {
     setSearch("");
     if (searchRef.current) {
@@ -349,9 +332,6 @@ export default function SongListPage() {
           <Button colorScheme="teal" as="a" href="/add">
             Thêm bài hát
           </Button>
-          {/* <Button colorScheme="orange" ml={4} onClick={seedSongs}>
-            Seed dữ liệu bài hát
-          </Button> */}
         </Box>
       </HStack>
       {loading ? (
@@ -371,7 +351,7 @@ export default function SongListPage() {
                 style={{ width: nameColWidth, minWidth: 0, maxWidth: "70vw" }}
               />
               <col
-                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "22vw" }}
+                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "16vw" }} // Đã thu hẹp hơn
               />
               <col
                 style={{
@@ -397,8 +377,8 @@ export default function SongListPage() {
                 <Th
                   textAlign="center"
                   p={cellPadding}
-                  pl={{ base: "2px", md: "8px" }}
-                  pr={{ base: "2px", md: "8px" }}
+                  pl={{ base: "2px", md: "2px" }}
+                  pr={{ base: "2px", md: "2px" }}
                   fontSize={{ base: "sm", md: "md" }}
                 >
                   Tempo
@@ -420,7 +400,6 @@ export default function SongListPage() {
                   style={{
                     transition: "background 0.08s",
                   }}
-                  // Swipe (touch/mouse) events for both desktop & mobile
                   onTouchStart={(e) => handleSwipeStart(e, song.id)}
                   onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
                   onMouseDown={(e) => handleSwipeStart(e, song.id)}
@@ -464,7 +443,7 @@ export default function SongListPage() {
                       fontWeight: "bold",
                       color: activeSongId === song.id ? "teal" : undefined,
                       paddingLeft: "2px",
-                      paddingRight: cellPadding,
+                      paddingRight: "2px",
                       paddingTop:
                         idx === 0
                           ? cellPadding
