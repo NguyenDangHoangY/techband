@@ -15,6 +15,8 @@ import {
   IconButton,
   HStack,
   Tooltip,
+  Text,
+  Flex,
 } from "@chakra-ui/react";
 import { FaBold, FaItalic } from "react-icons/fa";
 import { db } from "../firebase";
@@ -26,6 +28,13 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
   const [tempo, setTempo] = useState(100);
   const [note, setNote] = useState("");
   const [editing, setEditing] = useState(false);
+
+  // Tab tempo state
+  const [lastTap, setLastTap] = useState(null);
+  const [tapCount, setTapCount] = useState(0);
+  const [tapHistory, setTapHistory] = useState([]);
+  const tapTimeoutRef = useRef(null);
+
   const toast = useToast();
   const initialRef = useRef(null);
 
@@ -35,6 +44,10 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
       setTempo(song.tempo || 100);
       setNote(song.note || "");
       setEditing(false);
+      setTapCount(0);
+      setTapHistory([]);
+      setLastTap(null);
+      if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
     }
   }, [song]);
 
@@ -73,6 +86,34 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
         initialRef.current.focus();
       }
     }, 10);
+  };
+
+  // Tab tempo logic
+  const handleTapTempo = () => {
+    const now = Date.now();
+    if (lastTap && now - lastTap < 2000) {
+      const newHistory = [...tapHistory, now].slice(-6);
+      if (newHistory.length > 1) {
+        const intervals = newHistory.slice(1).map((t, i) => t - newHistory[i]);
+        const avgInterval =
+          intervals.reduce((sum, v) => sum + v, 0) / intervals.length;
+        const bpm = Math.round(60000 / avgInterval);
+        setTempo(Math.min(300, Math.max(30, bpm)));
+      }
+      setTapHistory(newHistory);
+      setTapCount(tapCount + 1);
+    } else {
+      setTapHistory([now]);
+      setTapCount(1);
+    }
+    setLastTap(now);
+
+    if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
+    tapTimeoutRef.current = setTimeout(() => {
+      setTapCount(0);
+      setTapHistory([]);
+      setLastTap(null);
+    }, 2500);
   };
 
   return (
@@ -140,25 +181,40 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
           >
             <span style={{ fontSize: "1.5em" }}>♩</span>
             {editing ? (
-              <NumberInput
-                value={tempo}
-                min={30}
-                max={300}
-                onChange={(_, n) => setTempo(n)}
-                width="100px"
-                size="md"
-                mr={2}
-              >
-                <NumberInputField
-                  border="none"
-                  fontWeight="bold"
-                  fontSize="xl"
-                  px={0}
-                  textAlign="center"
-                  _focus={{ boxShadow: "none" }}
-                  color="black"
-                />
-              </NumberInput>
+              <Flex align="center" gap={2}>
+                <NumberInput
+                  value={tempo}
+                  min={30}
+                  max={300}
+                  onChange={(_, n) => setTempo(n)}
+                  width="100px"
+                  size="md"
+                  mr={2}
+                >
+                  <NumberInputField
+                    border="none"
+                    fontWeight="bold"
+                    fontSize="xl"
+                    px={0}
+                    textAlign="center"
+                    _focus={{ boxShadow: "none" }}
+                    color="black"
+                  />
+                </NumberInput>
+                <Button
+                  size="xs"
+                  colorScheme="blue"
+                  variant="outline"
+                  onClick={handleTapTempo}
+                  type="button"
+                  ml={2}
+                >
+                  Tab tempo
+                </Button>
+                <Text fontSize="sm" color="gray.500">
+                  {tapCount > 1 ? `(${tapCount} nhịp)` : ""}
+                </Text>
+              </Flex>
             ) : (
               <Box
                 as="span"
@@ -168,6 +224,11 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
               >{`= ${tempo}`}</Box>
             )}
           </Box>
+          {editing && tapCount > 1 && (
+            <Text fontSize="xs" color="gray.500" mt={-2} mb={2} pl={["2", "8"]}>
+              Nhấn theo nhịp điệu bài hát, tempo sẽ tự động cập nhật.
+            </Text>
+          )}
           {/* Note: Markdown, không font handwriting */}
           <Box
             mt={2}
@@ -219,7 +280,7 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
                   border: "none",
                   resize: "vertical",
                   outline: "none",
-                  fontFamily: "inherit", // inherit từ theme
+                  fontFamily: "inherit",
                 }}
                 placeholder="Ghi chú, lyric, hợp âm..."
               />

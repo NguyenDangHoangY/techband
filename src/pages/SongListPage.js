@@ -12,13 +12,14 @@ import {
   Input,
   InputGroup,
   InputLeftElement,
+  InputRightElement,
   IconButton,
   HStack,
   useToast,
   Flex,
   useBreakpointValue,
 } from "@chakra-ui/react";
-import { SearchIcon, DeleteIcon } from "@chakra-ui/icons";
+import { SearchIcon, DeleteIcon, CloseIcon } from "@chakra-ui/icons";
 import { FaThumbtack } from "react-icons/fa";
 import { db } from "../firebase";
 import {
@@ -34,19 +35,6 @@ import {
 import SongDetailModal from "../components/SongDetailModal";
 import useMetronomeScheduler from "../components/MetronomeScheduler";
 
-const songsSeed = [
-  {
-    name: "Lòng Mẹ",
-    tempo: 90,
-    note: "Nhạc trữ tình nổi tiếng",
-  },
-  {
-    name: "Mưa Trên Cuộc Tình",
-    tempo: 100,
-    note: "Ballad nhẹ nhàng",
-  },
-];
-
 const seedSongs = async () => {
   for (const song of songsSeed) {
     await addDoc(collection(db, "songs"), song);
@@ -55,7 +43,7 @@ const seedSongs = async () => {
 };
 
 const MAX_TICKS = 16;
-const SYSTEM_STATE_DOC = "currentSong"; // document trong collection "systemState"
+const SYSTEM_STATE_DOC = "currentSong";
 
 function getAcronym(str) {
   return (str || "")
@@ -63,6 +51,9 @@ function getAcronym(str) {
     .map((w) => (w[0] || "").toUpperCase())
     .join("");
 }
+
+// Swipe (drag) detection constants
+const MIN_SWIPE_DISTANCE = 50; // px
 
 export default function SongListPage() {
   const [songs, setSongs] = useState([]);
@@ -77,13 +68,15 @@ export default function SongListPage() {
   const searchRef = useRef();
 
   const [editMode, setEditMode] = useState(false);
-  const holdTimerRef = useRef(null);
+  // For swipe detection
+  const swipeStartXRef = useRef(null);
+  const swipeActiveRowRef = useRef(null);
 
   const [systemSongId, setSystemSongId] = useState(null);
 
   const toast = useToast();
 
-  // Responsive padding and widths
+  // Responsive
   const cellPadding = useBreakpointValue({
     base: "8px",
     md: "10px",
@@ -164,6 +157,56 @@ export default function SongListPage() {
     }
   }, [tickCount, activeSongId]);
 
+  // Swipe handlers
+  const handleSwipeStart = (e, songId) => {
+    // touchstart/mousedown
+    let x = null;
+    if (e.touches && e.touches.length > 0) {
+      x = e.touches[0].clientX;
+    } else {
+      x = e.clientX;
+    }
+    swipeStartXRef.current = x;
+    swipeActiveRowRef.current = songId;
+  };
+
+  const handleSwipeEnd = (e, songId) => {
+    // touchend/mouseup
+    let x = null;
+    if (e.changedTouches && e.changedTouches.length > 0) {
+      x = e.changedTouches[0].clientX;
+    } else {
+      x = e.clientX;
+    }
+    const startX = swipeStartXRef.current;
+    swipeStartXRef.current = null;
+
+    // Only proceed if this is the same row
+    if (swipeActiveRowRef.current !== songId) return;
+    swipeActiveRowRef.current = null;
+
+    if (startX == null || x == null) return;
+    const deltaX = x - startX;
+    if (Math.abs(deltaX) < MIN_SWIPE_DISTANCE) return;
+    if (deltaX < 0) {
+      // Swipe left (bật edit mode)
+      setEditMode(true);
+    } else if (deltaX > 0) {
+      // Swipe right (tắt edit mode)
+      setEditMode(false);
+    }
+  };
+
+  // Thoát edit mode khi click ngoài bảng
+  useEffect(() => {
+    if (!editMode) return;
+    const handleClick = (e) => {
+      if (!e.target.closest("table")) setEditMode(false);
+    };
+    window.addEventListener("mousedown", handleClick);
+    return () => window.removeEventListener("mousedown", handleClick);
+  }, [editMode]);
+
   // Lọc và sắp xếp bài hát
   const filteredSongs = songs.filter((song) => {
     if (!search.trim()) return true;
@@ -191,30 +234,6 @@ export default function SongListPage() {
         })
       ),
   ];
-
-  // Long-press logic for editMode
-  const handleRowPointerDown = () => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = setTimeout(() => {
-      setEditMode((prev) => !prev);
-    }, 500);
-  };
-  const handleRowPointerUp = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-  };
-
-  // Thoát edit mode khi click ngoài bảng
-  useEffect(() => {
-    if (!editMode) return;
-    const handleClick = (e) => {
-      if (!e.target.closest("table")) setEditMode(false);
-    };
-    window.addEventListener("mousedown", handleClick);
-    return () => window.removeEventListener("mousedown", handleClick);
-  }, [editMode]);
 
   // Pin bài hát
   const handlePinSong = async (song, e) => {
@@ -265,12 +284,12 @@ export default function SongListPage() {
 
   // Chọn/Tắt metronome (đồng bộ toàn hệ thống)
   const handleTempoClick = async (song) => {
+    if (editMode) return;
     await ensureAudioReady();
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
 
-    // Nếu đang chọn lại bài này => tắt toàn hệ thống
     if (systemSongId === song.id) {
-      await setDoc(systemStateRef, {}); // xóa trạng thái (Firestore sẽ tự tạo doc nếu chưa có)
+      await setDoc(systemStateRef, {});
       setActiveSongId(null);
       setActiveTempo(null);
       setTickCount(0);
@@ -281,7 +300,6 @@ export default function SongListPage() {
         name: song.name,
         updatedAt: Date.now(),
       });
-      // Không cần setActiveSongId/setActiveTempo ở đây, sẽ được cập nhật qua onSnapshot
     }
   };
 
@@ -289,6 +307,14 @@ export default function SongListPage() {
   const handleRowClick = (song) => {
     if (editMode) return;
     setModalSong(song);
+  };
+
+  // Handler for clearing search
+  const handleClearSearch = () => {
+    setSearch("");
+    if (searchRef.current) {
+      searchRef.current.focus();
+    }
   };
 
   return (
@@ -306,14 +332,26 @@ export default function SongListPage() {
             pl="2.5em"
             fontSize="1.1em"
           />
+          {search && (
+            <InputRightElement width="2.5em">
+              <IconButton
+                aria-label="Xóa tìm kiếm"
+                icon={<CloseIcon />}
+                size="sm"
+                variant="ghost"
+                onClick={handleClearSearch}
+                tabIndex={-1}
+              />
+            </InputRightElement>
+          )}
         </InputGroup>
         <Box>
           <Button colorScheme="teal" as="a" href="/add">
             Thêm bài hát
           </Button>
-          <Button colorScheme="orange" ml={4} onClick={seedSongs}>
+          {/* <Button colorScheme="orange" ml={4} onClick={seedSongs}>
             Seed dữ liệu bài hát
-          </Button>
+          </Button> */}
         </Box>
       </HStack>
       {loading ? (
@@ -382,9 +420,11 @@ export default function SongListPage() {
                   style={{
                     transition: "background 0.08s",
                   }}
-                  onPointerDown={handleRowPointerDown}
-                  onPointerUp={handleRowPointerUp}
-                  onPointerLeave={handleRowPointerUp}
+                  // Swipe (touch/mouse) events for both desktop & mobile
+                  onTouchStart={(e) => handleSwipeStart(e, song.id)}
+                  onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
+                  onMouseDown={(e) => handleSwipeStart(e, song.id)}
+                  onMouseUp={(e) => handleSwipeEnd(e, song.id)}
                 >
                   <Td
                     style={{
@@ -433,7 +473,7 @@ export default function SongListPage() {
                       fontSize: "1em",
                       background: "inherit",
                     }}
-                    onClick={() => !editMode && handleTempoClick(song)}
+                    onClick={() => handleTempoClick(song)}
                   >
                     {song.tempo || 120}
                     {activeSongId === song.id && (
