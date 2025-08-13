@@ -81,16 +81,16 @@ export default function SongListPage() {
     lg: "16px",
   });
   const rowSpacing = useBreakpointValue({ base: "10px", md: "8px" });
+  // Giảm maxWidth của cột tên bài hát, tăng một chút của cột tempo để tránh xuống hàng
   const nameColWidth = useBreakpointValue({
-    base: "63vw",
-    md: "200px",
-    lg: "220px",
+    base: "56vw", // giảm từ 63vw
+    md: "180px", // giảm từ 200px
+    lg: "200px", // giảm từ 220px
   });
-  // THU HẸP TEMPO COLUMN: giảm width xuống
   const tempoColWidth = useBreakpointValue({
-    base: "14vw",
-    md: "64px",
-    lg: "80px",
+    base: "20vw", // tăng từ 14vw -> 20vw cho mobile
+    md: "70px", // tăng từ 64px -> 70px cho tablet
+    lg: "90px", // tăng từ 80px -> 90px cho desktop
   });
   const iconColWidth = useBreakpointValue({
     base: "36px",
@@ -348,10 +348,10 @@ export default function SongListPage() {
           >
             <colgroup>
               <col
-                style={{ width: nameColWidth, minWidth: 0, maxWidth: "70vw" }}
+                style={{ width: nameColWidth, minWidth: 0, maxWidth: "56vw" }} // giảm maxWidth
               />
               <col
-                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "16vw" }} // Đã thu hẹp hơn
+                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "20vw" }} // tăng maxWidth
               />
               <col
                 style={{
@@ -372,7 +372,7 @@ export default function SongListPage() {
                   pr={{ base: "2px", md: "8px" }}
                   fontSize={{ base: "sm", md: "md" }}
                 >
-                  Tên bài hát
+                  TÊN BÀI HÁT
                 </Th>
                 <Th
                   textAlign="center"
@@ -381,7 +381,7 @@ export default function SongListPage() {
                   pr={{ base: "2px", md: "2px" }}
                   fontSize={{ base: "sm", md: "md" }}
                 >
-                  Tempo
+                  TEMPO
                 </Th>
                 <Th textAlign="center" p={0}></Th>
               </Tr>
