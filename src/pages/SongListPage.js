@@ -40,6 +40,7 @@ import {
 } from "firebase/firestore";
 import SongDetailModal from "../components/SongDetailModal";
 import useMetronomeScheduler from "../components/MetronomeScheduler";
+import "./SongListPage.css"; // import CSS file
 
 const seedSongs = async () => {
   for (const song of songsSeed) {
@@ -68,10 +69,8 @@ export default function SongListPage() {
   const [modalSong, setModalSong] = useState(null);
   const [tickCount, setTickCount] = useState(0);
 
-  const [flashRow, setFlashRow] = useState(null);
-  const [fadePercent, setFadePercent] = useState(0);
-  const fadeRaf = useRef(null);
-  const fadeStartTime = useRef(0);
+  const [rowAnimState, setRowAnimState] = useState({}); // { rowId: "flash" | "fade" | "done" }
+  const fadeTimeouts = useRef({}); // { rowId: [timeoutId1, timeoutId2] }
 
   const [search, setSearch] = useState("");
   const searchRef = useRef();
@@ -143,48 +142,35 @@ export default function SongListPage() {
     bpm: activeTempo,
     isActive: !!activeSongId,
     onTick: useCallback(() => {
-      // Always clear previous fade animation before starting
-      if (fadeRaf.current) {
-        cancelAnimationFrame(fadeRaf.current);
-        fadeRaf.current = null;
-      }
-
-      setFlashRow(activeSongId);
-      setFadePercent(0);
-      fadeStartTime.current = Date.now();
-
+      if (!activeSongId) return;
       const msPerTick = activeTempo ? 60000 / activeTempo : 500;
-
-      // Fade from teal.400 to teal.100 over the full tick
-      function fade() {
-        const elapsed = Date.now() - fadeStartTime.current;
-        let percent = Math.min(elapsed / msPerTick, 1);
-        setFadePercent(percent);
-
-        if (percent < 1) {
-          fadeRaf.current = requestAnimationFrame(fade);
-        } else {
-          setFlashRow(null);
-          fadeRaf.current = null;
-        }
-      }
-      fadeRaf.current = requestAnimationFrame(fade);
-
-      // Cleanup if tick changes or component unmounts
-      return () => {
-        if (fadeRaf.current) {
-          cancelAnimationFrame(fadeRaf.current);
-          fadeRaf.current = null;
-        }
-      };
+      startRowAnim(activeSongId, msPerTick);
     }, [activeSongId, activeTempo]),
   });
 
+  // Animation logic using CSS className and transition-duration
+  function startRowAnim(rowId, msPerTick) {
+    // Clear previous timeouts for this row
+    if (fadeTimeouts.current[rowId]) {
+      fadeTimeouts.current[rowId].forEach((t) => clearTimeout(t));
+    }
+    // Set "flash" state
+    setRowAnimState((prev) => ({ ...prev, [rowId]: "flash" }));
+    // After 120ms, switch to "fade"
+    const t1 = setTimeout(() => {
+      setRowAnimState((prev) => ({ ...prev, [rowId]: "fade" }));
+    }, 120);
+    // After msPerTick, switch to "done"
+    const t2 = setTimeout(() => {
+      setRowAnimState((prev) => ({ ...prev, [rowId]: "done" }));
+    }, msPerTick);
+    fadeTimeouts.current[rowId] = [t1, t2];
+  }
+
   useEffect(() => {
+    // Clean up all timeouts when unmount
     return () => {
-      if (fadeRaf.current) {
-        cancelAnimationFrame(fadeRaf.current);
-      }
+      Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
     };
   }, []);
 
@@ -322,6 +308,22 @@ export default function SongListPage() {
       ),
   ];
 
+  useEffect(() => {
+    // Clear tất cả timeout khi đổi bài hát
+    Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
+    fadeTimeouts.current = {};
+
+    // Reset màu của tất cả các hàng ngay lập tức
+    setRowAnimState({});
+
+    // Nếu có bài active mới, chạy nháy màu cho bài đó
+    if (activeSongId && activeTempo) {
+      startRowAnim(activeSongId, 60000 / activeTempo);
+    } else if (activeSongId) {
+      startRowAnim(activeSongId, 500);
+    }
+  }, [activeSongId, activeTempo]);
+
   const handlePinSong = async (song, e) => {
     e.stopPropagation();
     if (song.pinned) {
@@ -372,6 +374,9 @@ export default function SongListPage() {
     await ensureAudioReady();
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
 
+    // Reset màu nền các bài trước đó
+    setRowAnimState({});
+
     if (systemSongId === song.id) {
       await setDoc(systemStateRef, {});
       setActiveSongId(null);
@@ -384,6 +389,8 @@ export default function SongListPage() {
         name: song.name,
         updatedAt: Date.now(),
       });
+      // KHÔNG gọi startRowAnim ở đây, để metronome tick tự lo nháy màu!
+      // (Nếu muốn flash khi click thì chỉ flash 1 lần, không nên chồng animation)
     }
   };
 
@@ -399,18 +406,26 @@ export default function SongListPage() {
     }
   };
 
-  // Hàm lấy màu fade động cho nháy tempo, chuyển từ xanh đậm (#38B2AC) về xanh nhạt nhất (#E6FFFA)
-  function getFadeBg(flash, percent, active, id) {
-    if (flash === id) {
-      // Interpolate từ teal.400 về teal.100 theo percent
-      const from = [56, 178, 172]; // teal.400
-      const to = [230, 255, 250]; // teal.100
-      const c = from.map((v, i) => Math.round(v + (to[i] - v) * percent));
-      return `rgb(${c[0]},${c[1]},${c[2]})`;
-    } else if (active === id) {
-      return "#B2F5EA"; // teal.100 nhạt nhất
+  // Get class for row animation
+  function getRowAnimClass(rowId, msPerTick) {
+    const state = rowAnimState[rowId];
+    if (!state && activeSongId === rowId) {
+      return "tr-done";
     }
-    return undefined;
+    if (!state) return "";
+    if (state === "flash") return "tr-flash";
+    if (state === "fade") return "tr-fade";
+    if (state === "done") return "tr-done";
+    return "";
+  }
+
+  // Get style for tick duration
+  function getRowAnimStyle(rowId) {
+    const msPerTick =
+      activeSongId === rowId ? (activeTempo ? 60000 / activeTempo : 500) : 500;
+    return {
+      "--fade-duration": `${msPerTick}ms`,
+    };
   }
 
   return (
@@ -605,20 +620,16 @@ export default function SongListPage() {
             </Thead>
             <Tbody>
               {sortedSongs.map((song, idx) => {
-                const bgColor = getFadeBg(
-                  flashRow,
-                  fadePercent,
-                  activeSongId,
-                  song.id
+                const rowClass = getRowAnimClass(
+                  song.id,
+                  activeTempo ? 60000 / activeTempo : 500
                 );
+                const rowStyle = getRowAnimStyle(song.id);
                 return (
                   <Tr
                     key={song.id}
-                    bg={bgColor}
-                    style={{
-                      transition:
-                        flashRow === song.id ? "background 0.08s" : "none",
-                    }}
+                    className={rowClass}
+                    style={rowStyle}
                     onTouchStart={(e) => handleSwipeStart(e, song.id)}
                     onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
                     onMouseDown={(e) => handleSwipeStart(e, song.id)}
