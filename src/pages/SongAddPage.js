@@ -31,8 +31,7 @@ export default function SongAddPage() {
   const handleTapTempo = () => {
     const now = Date.now();
     if (lastTap && now - lastTap < 2000) {
-      // Tính tempo dựa trên các lần nhấn gần nhất
-      const newHistory = [...tapHistory, now].slice(-6); // chỉ lấy 6 nhịp gần nhất để tránh chệch
+      const newHistory = [...tapHistory, now].slice(-6);
       if (newHistory.length > 1) {
         const intervals = newHistory.slice(1).map((t, i) => t - newHistory[i]);
         const avgInterval =
@@ -43,13 +42,11 @@ export default function SongAddPage() {
       setTapHistory(newHistory);
       setTapCount(tapCount + 1);
     } else {
-      // Nếu quá lâu không nhấn, reset lại
       setTapHistory([now]);
       setTapCount(1);
     }
     setLastTap(now);
 
-    // Nếu quá 2 giây không nhấn, tự reset
     if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
     tapTimeoutRef.current = setTimeout(() => {
       setTapCount(0);
@@ -81,11 +78,14 @@ export default function SongAddPage() {
             Tempo (BPM)
             <Button
               ml={3}
-              size="xs"
+              size="lg"
               colorScheme="blue"
               variant="outline"
               onClick={handleTapTempo}
               type="button"
+              px={8}
+              fontSize="xl"
+              height="52px"
             >
               Tab tempo
             </Button>
@@ -112,7 +112,14 @@ export default function SongAddPage() {
         </FormControl>
         <FormControl mb={3}>
           <FormLabel>Note</FormLabel>
-          <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
+          <Textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            minHeight="260px" // Tăng diện tích khung nhập liệu lớn hơn nhiều
+            resize="vertical"
+            fontSize="1.1em"
+            p={3}
+          />
         </FormControl>
         <Button type="submit" colorScheme="teal">
           Thêm bài hát

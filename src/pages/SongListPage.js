@@ -135,7 +135,8 @@ export default function SongListPage() {
   });
   const rowSpacing = useBreakpointValue({
     base: "10px",
-    md: "8px",
+    md: "10px",
+    lg: "12px",
   });
 
   // Metronome scheduler
@@ -151,21 +152,15 @@ export default function SongListPage() {
 
   // Animation logic using CSS className and transition-duration
   function startRowAnim(rowId, msPerTick) {
-    // Chỉ chạy nháy màu nếu rowId === activeSongId (đảm bảo đúng bài)
     if (rowId !== activeSongId) return;
-
-    // Clear previous timeouts for this row
     if (fadeTimeouts.current[rowId]) {
       fadeTimeouts.current[rowId].forEach((t) => clearTimeout(t));
     }
-    // Set "flash" state
     setRowAnimState((prev) => ({ [rowId]: "flash" }));
-    // After 120ms, switch to "fade"
     const t1 = setTimeout(() => {
       if (rowId === activeSongId)
         setRowAnimState((prev) => ({ [rowId]: "fade" }));
     }, 120);
-    // After msPerTick, switch to "done"
     const t2 = setTimeout(() => {
       if (rowId === activeSongId)
         setRowAnimState((prev) => ({ [rowId]: "done" }));
@@ -174,7 +169,6 @@ export default function SongListPage() {
   }
 
   useEffect(() => {
-    // Clean up all timeouts when unmount
     return () => {
       Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
     };
@@ -250,7 +244,6 @@ export default function SongListPage() {
     setTimeout(() => {
       const rowRef = songRowRefs.current[activeSongId];
       if (rowRef && rowRef.current && rowRef.current.scrollIntoView) {
-        // Tính toán vị trí để bài hát nằm giữa màn hình
         const rowRect = rowRef.current.getBoundingClientRect();
         const viewportHeight =
           window.innerHeight || document.documentElement.clientHeight;
@@ -262,9 +255,10 @@ export default function SongListPage() {
           behavior: "smooth",
         });
       }
-    }, 350); // delay để đảm bảo màu nháy đã apply, table đã render
+    }, 350);
   }, [activeSongId, songs.length]);
 
+  // xử lý vuốt sang trái/phải để mở/tắt edit mode
   const handleSwipeStart = (e, songId) => {
     let x = null;
     if (e.touches && e.touches.length > 0) {
@@ -336,14 +330,9 @@ export default function SongListPage() {
   ];
 
   useEffect(() => {
-    // Clear tất cả timeout khi đổi bài hát
     Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
     fadeTimeouts.current = {};
-
-    // Reset màu của tất cả các hàng ngay lập tức
     setRowAnimState({});
-
-    // Nếu có bài active mới, chạy nháy màu cho bài đó
     if (activeSongId && activeTempo) {
       startRowAnim(activeSongId, 60000 / activeTempo);
     } else if (activeSongId) {
@@ -401,7 +390,6 @@ export default function SongListPage() {
     await ensureAudioReady();
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
 
-    // Reset màu nền các bài trước đó
     setRowAnimState({});
 
     if (systemSongId === song.id) {
@@ -416,7 +404,6 @@ export default function SongListPage() {
         name: song.name,
         updatedAt: Date.now(),
       });
-      // KHÔNG gọi startRowAnim ở đây, để metronome tick tự lo nháy màu!
     }
   };
 
@@ -432,7 +419,6 @@ export default function SongListPage() {
     }
   };
 
-  // Get class for row animation
   function getRowAnimClass(rowId, msPerTick) {
     const state = rowAnimState[rowId];
     if (!state && activeSongId === rowId) {
@@ -445,7 +431,6 @@ export default function SongListPage() {
     return "";
   }
 
-  // Get style for tick duration
   function getRowAnimStyle(rowId) {
     const msPerTick =
       activeSongId === rowId ? (activeTempo ? 60000 / activeTempo : 500) : 500;
@@ -675,13 +660,15 @@ export default function SongListPage() {
                         whiteSpace: "nowrap",
                         paddingLeft: cellPadding,
                         paddingRight: "2px",
-                        paddingTop:
-                          idx === 0
-                            ? cellPadding
-                            : `calc(${cellPadding} + ${rowSpacing})`,
-                        paddingBottom: cellPadding,
+                        paddingTop: cellPadding + rowSpacing,
+                        paddingBottom: cellPadding + rowSpacing,
                         fontSize: "1em",
                         background: "inherit",
+                        borderBottom:
+                          idx < sortedSongs.length - 1
+                            ? "1px solid #e2e8f0"
+                            : undefined,
+                        verticalAlign: "middle",
                       }}
                       onClick={() => handleRowClick(song)}
                       title={song.name}
@@ -704,13 +691,15 @@ export default function SongListPage() {
                         color: activeSongId === song.id ? "teal" : undefined,
                         paddingLeft: "2px",
                         paddingRight: "2px",
-                        paddingTop:
-                          idx === 0
-                            ? cellPadding
-                            : `calc(${cellPadding} + ${rowSpacing})`,
-                        paddingBottom: cellPadding,
+                        paddingTop: cellPadding + rowSpacing,
+                        paddingBottom: cellPadding + rowSpacing,
                         fontSize: "1em",
                         background: "inherit",
+                        borderBottom:
+                          idx < sortedSongs.length - 1
+                            ? "1px solid #e2e8f0"
+                            : undefined,
+                        verticalAlign: "middle",
                       }}
                       onClick={() => handleTempoClick(song)}
                     >
@@ -723,12 +712,14 @@ export default function SongListPage() {
                       textAlign="center"
                       p={0}
                       style={{
-                        paddingTop:
-                          idx === 0
-                            ? cellPadding
-                            : `calc(${cellPadding} + ${rowSpacing})`,
-                        paddingBottom: cellPadding,
+                        paddingTop: cellPadding + rowSpacing,
+                        paddingBottom: cellPadding + rowSpacing,
                         background: "inherit",
+                        borderBottom:
+                          idx < sortedSongs.length - 1
+                            ? "1px solid #e2e8f0"
+                            : undefined,
+                        verticalAlign: "middle",
                       }}
                     >
                       {editMode ? (

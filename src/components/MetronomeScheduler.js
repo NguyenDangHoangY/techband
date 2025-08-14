@@ -1,14 +1,21 @@
 import { useRef, useEffect } from "react";
 
-// Kết hợp v52 và v53: trigger tiếng và nháy đồng thời (như v53)
-// Không cần quản lý nút unlock audio ở đây, chỉ đảm bảo chức năng metronome và đồng bộ tiếng/nháy.
+// Đã cập nhật: tự động dừng sau 24 nhịp, truyền thêm onStop
 
-export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
+export default function useMetronomeScheduler({
+  bpm,
+  isActive,
+  onTick,
+  onStop,
+}) {
   const audioCtxRef = useRef(null);
   const bufferRef = useRef(null);
   const timerRef = useRef(null);
   const nextTickTimeRef = useRef(0);
   const bufferLoadedRef = useRef(false);
+
+  // Số nhịp đã phát, reset mỗi lần kích hoạt
+  const tickCountRef = useRef(0);
 
   // Hàm này cần được gọi từ onClick/onTouch của người dùng
   const ensureAudioReady = async () => {
@@ -38,10 +45,19 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
 
     const startAt = ctx.currentTime + 0.05;
 
+    tickCountRef.current = 0;
+
     function scheduleTick(when) {
       // Chớp nháy và phát tiếng đồng thời (khớp tuyệt đối)
       if (onTick) {
         onTick();
+      }
+      tickCountRef.current += 1;
+      if (tickCountRef.current >= 25) {
+        stopped = true;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        if (onStop) onStop();
+        return;
       }
       const source = ctx.createBufferSource();
       source.buffer = bufferRef.current;
@@ -52,7 +68,7 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
     function scheduler() {
       const lookahead = 0.1;
       let now = ctx.currentTime;
-      while (nextTickTimeRef.current < now + lookahead) {
+      while (nextTickTimeRef.current < now + lookahead && !stopped) {
         scheduleTick(nextTickTimeRef.current);
         nextTickTimeRef.current += interval;
       }
@@ -68,7 +84,7 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
       stopped = true;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [isActive, bpm, onTick, bufferRef.current]);
+  }, [isActive, bpm, onTick, onStop, bufferRef.current]);
 
   return { ensureAudioReady, audioCtxRef, bufferRef };
 }

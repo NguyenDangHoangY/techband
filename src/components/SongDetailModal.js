@@ -202,12 +202,15 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
                   />
                 </NumberInput>
                 <Button
-                  size="xs"
+                  size="lg" // Tăng kích thước nút Tab tempo
                   colorScheme="blue"
                   variant="outline"
                   onClick={handleTapTempo}
                   type="button"
                   ml={2}
+                  px={8} // Tăng chiều ngang nút
+                  fontSize="xl" // Tăng font chữ
+                  height="52px" // Tăng chiều cao nút trên mobile
                 >
                   Tab tempo
                 </Button>
@@ -274,13 +277,15 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
                 onChange={(e) => setNote(e.target.value)}
                 rows={8}
                 style={{
-                  fontSize: "1.2em",
+                  fontSize: "1.6em", // Tăng font-size textarea
                   width: "100%",
                   background: "transparent",
                   border: "none",
                   resize: "vertical",
                   outline: "none",
                   fontFamily: "inherit",
+                  minHeight: "160px", // Tăng chiều cao tối thiểu
+                  padding: "10px 0",
                 }}
                 placeholder="Ghi chú, lyric, hợp âm..."
               />
