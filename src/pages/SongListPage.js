@@ -14,13 +14,19 @@ import {
   InputLeftElement,
   InputRightElement,
   IconButton,
-  HStack,
   useToast,
   Flex,
   useBreakpointValue,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
 } from "@chakra-ui/react";
 import { SearchIcon, DeleteIcon, CloseIcon } from "@chakra-ui/icons";
 import { FaThumbtack } from "react-icons/fa";
+import { MdVolumeUp } from "react-icons/md";
 import { db } from "../firebase";
 import {
   collection,
@@ -72,32 +78,40 @@ export default function SongListPage() {
 
   const toast = useToast();
 
-  // Responsive
-  const cellPadding = useBreakpointValue({
-    base: "8px",
-    md: "10px",
-    lg: "16px",
+  // Responsive tweaks for iPhone mini
+  const toolbarPadding = useBreakpointValue({
+    base: "6px 2px 6px 2px",
+    md: "10px 12px 8px 12px",
   });
-  const rowSpacing = useBreakpointValue({ base: "10px", md: "8px" });
-  const nameColWidth = useBreakpointValue({
-    base: "56vw",
-    md: "180px",
-    lg: "200px",
+  const inputFontSize = useBreakpointValue({
+    base: "0.97em",
+    md: "1.08em",
   });
-  const tempoColWidth = useBreakpointValue({
-    base: "20vw",
-    md: "70px",
-    lg: "90px",
+  const inputHeight = useBreakpointValue({
+    base: "32px",
+    md: "38px",
   });
-  const iconColWidth = useBreakpointValue({
-    base: "36px",
-    md: "36px",
-    lg: "36px",
+  const buttonFontSize = useBreakpointValue({
+    base: "0.97em",
+    md: "1em",
+  });
+  const buttonHeight = useBreakpointValue({
+    base: "32px",
+    md: "38px",
+  });
+  // Reduce minW to fit all buttons on small screens
+  const buttonMinW = useBreakpointValue({
+    base: "84px",
+    sm: "92px",
+    md: "110px",
+  });
+  const buttonMaxW = useBreakpointValue({
+    base: "31vw",
+    md: "140px",
   });
 
-  // Không cần trạng thái unlock, luôn hiện nút audio controls
-
-  const { ensureAudioReady, audioCtxRef, bufferRef } = useMetronomeScheduler({
+  // Metronome scheduler
+  const { ensureAudioReady } = useMetronomeScheduler({
     bpm: activeTempo,
     isActive: !!activeSongId,
     onTick: useCallback(() => {
@@ -107,33 +121,29 @@ export default function SongListPage() {
     }, [activeSongId]),
   });
 
-  // Khi user bấm Play trên thẻ audio controls, phát một tick/beep bằng context thực tế
-  const handleTestAudioPlay = async () => {
-    let ctx = audioCtxRef?.current;
-    if (!ctx) {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      audioCtxRef.current = ctx;
-    }
-    if (ctx.state === "suspended") {
-      await ctx.resume();
-    }
+  // Ref cho audio element của nút unlock
+  const audioUnlockRef = useRef();
 
-    if (bufferRef?.current) {
-      // Phát tick.wav thật sự
-      const source = ctx.createBufferSource();
-      source.buffer = bufferRef.current;
-      source.connect(ctx.destination);
-      source.start();
-    } else {
-      // Nếu chưa có buffer, phát beep ngắn bằng oscillator
-      const osc = ctx.createOscillator();
-      osc.type = "square";
-      osc.frequency.value = 880;
-      const gain = ctx.createGain();
-      gain.gain.value = 0.5;
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.15);
+  // Popup cho phép bật tiếng
+  const [showAudioPopup, setShowAudioPopup] = useState(true);
+
+  const handleCloseAudioPopup = () => setShowAudioPopup(false);
+
+  const handlePlayAudioAllow = async () => {
+    if (audioUnlockRef.current) {
+      try {
+        await audioUnlockRef.current.play();
+      } catch (e) {}
+    }
+    setShowAudioPopup(false);
+  };
+
+  // Nút bật tiếng: giống hệt v62
+  const handlePlayAudioUnlock = async () => {
+    if (audioUnlockRef.current) {
+      try {
+        await audioUnlockRef.current.play();
+      } catch (e) {}
     }
   };
 
@@ -177,6 +187,31 @@ export default function SongListPage() {
       setTickCount(0);
     }
   }, [tickCount, activeSongId]);
+
+  const nameColWidth = useBreakpointValue({
+    base: "56vw",
+    md: "180px",
+    lg: "200px",
+  });
+  const tempoColWidth = useBreakpointValue({
+    base: "20vw",
+    md: "70px",
+    lg: "90px",
+  });
+  const iconColWidth = useBreakpointValue({
+    base: "36px",
+    md: "36px",
+    lg: "36px",
+  });
+  const cellPadding = useBreakpointValue({
+    base: "8px",
+    md: "10px",
+    lg: "16px",
+  });
+  const rowSpacing = useBreakpointValue({
+    base: "10px",
+    md: "8px",
+  });
 
   const handleSwipeStart = (e, songId) => {
     let x = null;
@@ -327,73 +362,144 @@ export default function SongListPage() {
 
   return (
     <Box maxW="600px" mx="auto" p={{ base: 1, md: 2 }}>
-      <HStack mb={4} justify="space-between">
-        <InputGroup maxW="220px">
-          <InputLeftElement pointerEvents="none" width="2.5em">
-            <SearchIcon color="gray.400" boxSize="1.2em" />
-          </InputLeftElement>
-          <Input
-            ref={searchRef}
-            placeholder="Tìm kiếm bài hát"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            pl="2.5em"
-            fontSize="1.1em"
-          />
-          {search && (
-            <InputRightElement width="2.5em">
-              <IconButton
-                aria-label="Xóa tìm kiếm"
-                icon={<CloseIcon />}
-                size="sm"
-                variant="ghost"
-                onClick={handleClearSearch}
-                tabIndex={-1}
-              />
-            </InputRightElement>
-          )}
-        </InputGroup>
-        <Box>
-          <Button colorScheme="teal" as="a" href="/add">
+      {/* Popup unlock audio, handle giống hệt nút bật tiếng v62, chỉ khác chữ "cho phép" */}
+      <Modal isOpen={showAudioPopup} onClose={handleCloseAudioPopup} isCentered>
+        <ModalOverlay />
+        <ModalContent maxW="340px">
+          <ModalHeader fontSize="lg" fontWeight="bold" textAlign="center">
+            Cho phép bật âm thanh
+          </ModalHeader>
+          <ModalBody>
+            <Box fontSize="md" textAlign="center">
+              Để sử dụng tính năng nhịp/phát tiếng, vui lòng cấp quyền phát âm
+              thanh cho trình duyệt.
+              <br />
+              <br />
+              Nhấn <b>Cho phép</b> để khởi động hệ thống âm thanh.
+            </Box>
+          </ModalBody>
+          <ModalFooter justifyContent="center">
+            <Button
+              leftIcon={<MdVolumeUp />}
+              colorScheme="teal"
+              borderRadius="lg"
+              fontWeight="600"
+              fontSize={buttonFontSize}
+              minW={buttonMinW}
+              maxW={buttonMaxW}
+              height={buttonHeight}
+              onClick={handlePlayAudioAllow}
+              mr={2}
+            >
+              Cho phép
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleCloseAudioPopup}
+              borderRadius="lg"
+              fontSize={buttonFontSize}
+              height={buttonHeight}
+              minW="60px"
+              maxW="80px"
+            >
+              Đóng
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+      {/* Sticky toolbar */}
+      <Box
+        position="sticky"
+        top={0}
+        zIndex={20}
+        bg="white"
+        boxShadow="md"
+        borderBottom="1px solid #eee"
+        pb={1}
+        pt={{ base: 0, md: 1 }}
+        mb={2}
+        style={{
+          backdropFilter: "blur(2px)",
+        }}
+      >
+        <Flex align="center" gap={1} px={toolbarPadding} wrap="nowrap" w="100%">
+          <InputGroup flex="1" maxW={{ base: "40vw", md: "230px" }}>
+            <InputLeftElement pointerEvents="none" width="2.2em">
+              <SearchIcon color="gray.400" boxSize="1.1em" />
+            </InputLeftElement>
+            <Input
+              ref={searchRef}
+              placeholder="Tìm kiếm bài hát"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              pl="2.2em"
+              fontSize={inputFontSize}
+              height={inputHeight}
+              borderRadius="lg"
+              bg="white"
+              border="1px solid #c6e0f5"
+            />
+            {search && (
+              <InputRightElement width="2.2em">
+                <IconButton
+                  aria-label="Xóa tìm kiếm"
+                  icon={<CloseIcon />}
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleClearSearch}
+                  tabIndex={-1}
+                />
+              </InputRightElement>
+            )}
+          </InputGroup>
+          <Button
+            leftIcon={<MdVolumeUp />}
+            colorScheme="teal"
+            borderRadius="lg"
+            fontWeight="600"
+            minW={buttonMinW}
+            maxW={buttonMaxW}
+            height={buttonHeight}
+            fontSize={buttonFontSize}
+            onClick={handlePlayAudioUnlock}
+            ml={{ base: 1, md: 2 }}
+            mr={{ base: 1, md: 2 }}
+            px={{ base: 2, md: 4 }}
+            flexShrink={0}
+          >
+            Bật tiếng
+          </Button>
+          <Button
+            colorScheme="teal"
+            borderRadius="lg"
+            fontWeight="600"
+            minW={buttonMinW}
+            maxW={buttonMaxW}
+            height={buttonHeight}
+            fontSize={buttonFontSize}
+            as="a"
+            href="/add"
+            px={{ base: 2, md: 4 }}
+            flexShrink={0}
+            whiteSpace="nowrap"
+          >
             Thêm bài hát
           </Button>
-        </Box>
-      </HStack>
-      {/* Luôn hiện nút audio controls, không ẩn */}
-      <Box mb={3} textAlign="center">
-        <Button
-          variant="outline"
-          colorScheme="orange"
-          borderRadius="lg"
-          padding="2px 8px"
-          height="auto"
-          minWidth="0"
-          border="none"
-          _hover={{ bg: "orange.50" }}
-          style={{ boxShadow: "none", fontWeight: "600", fontSize: "1em" }}
-          leftIcon={
-            <audio
-              controls
-              src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAACABAAZGF0YQAAAAAAABQAAAD/AAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAA="
-              style={{
-                width: 90,
-                height: 32,
-                verticalAlign: "middle",
-                marginRight: 8,
-                borderRadius: 6,
-                background: "#fff",
-                boxShadow: "0 0 2px #0002",
-                border: "1px solid #f6ad55",
-                display: "inline-block",
-              }}
-              onPlay={handleTestAudioPlay}
-              tabIndex={0}
-            />
-          }
-        >
-          Nhấn để bật tiếng
-        </Button>
+        </Flex>
       </Box>
+      <audio
+        ref={audioUnlockRef}
+        src="/tick.wav"
+        preload="auto"
+        style={{
+          width: 0,
+          height: 0,
+          opacity: 0,
+          pointerEvents: "none",
+          position: "absolute",
+        }}
+        tabIndex={-1}
+      />
       {loading ? (
         <Spinner />
       ) : (
