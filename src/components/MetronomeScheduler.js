@@ -1,5 +1,8 @@
 import { useRef, useEffect } from "react";
 
+// Kết hợp v52 và v53: trigger tiếng và nháy đồng thời (như v53)
+// Không cần quản lý nút unlock audio ở đây, chỉ đảm bảo chức năng metronome và đồng bộ tiếng/nháy.
+
 export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
   const audioCtxRef = useRef(null);
   const bufferRef = useRef(null);
@@ -16,7 +19,6 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
     if (audioCtxRef.current.state === "suspended") {
       await audioCtxRef.current.resume();
     }
-    // Nếu chưa load buffer, load ngay
     if (!bufferRef.current && !bufferLoadedRef.current) {
       bufferLoadedRef.current = true;
       const response = await fetch("/tick.wav");
@@ -37,15 +39,14 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
     const startAt = ctx.currentTime + 0.05;
 
     function scheduleTick(when) {
+      // Chớp nháy và phát tiếng đồng thời (khớp tuyệt đối)
+      if (onTick) {
+        onTick();
+      }
       const source = ctx.createBufferSource();
       source.buffer = bufferRef.current;
       source.connect(ctx.destination);
       source.start(when);
-      if (onTick) {
-        const now = ctx.currentTime;
-        const delay = Math.max((when - now) * 1000, 0);
-        setTimeout(onTick, delay);
-      }
     }
 
     function scheduler() {
@@ -69,6 +70,5 @@ export default function useMetronomeScheduler({ bpm, isActive, onTick }) {
     };
   }, [isActive, bpm, onTick, bufferRef.current]);
 
-  // Trả về hàm phải gọi trước khi bật metronome
-  return { ensureAudioReady };
+  return { ensureAudioReady, audioCtxRef, bufferRef };
 }

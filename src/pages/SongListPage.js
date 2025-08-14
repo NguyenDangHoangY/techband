@@ -65,11 +65,9 @@ export default function SongListPage() {
 
   const [search, setSearch] = useState("");
   const searchRef = useRef();
-
   const [editMode, setEditMode] = useState(false);
   const swipeStartXRef = useRef(null);
   const swipeActiveRowRef = useRef(null);
-
   const [systemSongId, setSystemSongId] = useState(null);
 
   const toast = useToast();
@@ -81,28 +79,25 @@ export default function SongListPage() {
     lg: "16px",
   });
   const rowSpacing = useBreakpointValue({ base: "10px", md: "8px" });
-  // Giảm maxWidth của cột tên bài hát, tăng một chút của cột tempo để tránh xuống hàng
   const nameColWidth = useBreakpointValue({
-    base: "56vw", // giảm từ 63vw
-    md: "180px", // giảm từ 200px
-    lg: "200px", // giảm từ 220px
+    base: "56vw",
+    md: "180px",
+    lg: "200px",
   });
   const tempoColWidth = useBreakpointValue({
-    base: "20vw", // tăng từ 14vw -> 20vw cho mobile
-    md: "70px", // tăng từ 64px -> 70px cho tablet
-    lg: "90px", // tăng từ 80px -> 90px cho desktop
+    base: "20vw",
+    md: "70px",
+    lg: "90px",
   });
   const iconColWidth = useBreakpointValue({
     base: "36px",
     md: "36px",
     lg: "36px",
   });
-  const searchInputPaddingLeft = useBreakpointValue({
-    base: "38px",
-    md: "44px",
-  });
 
-  const { ensureAudioReady } = useMetronomeScheduler({
+  // Không cần trạng thái unlock, luôn hiện nút audio controls
+
+  const { ensureAudioReady, audioCtxRef, bufferRef } = useMetronomeScheduler({
     bpm: activeTempo,
     isActive: !!activeSongId,
     onTick: useCallback(() => {
@@ -111,6 +106,36 @@ export default function SongListPage() {
       setTimeout(() => setFlashRow(null), 100);
     }, [activeSongId]),
   });
+
+  // Khi user bấm Play trên thẻ audio controls, phát một tick/beep bằng context thực tế
+  const handleTestAudioPlay = async () => {
+    let ctx = audioCtxRef?.current;
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtxRef.current = ctx;
+    }
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    if (bufferRef?.current) {
+      // Phát tick.wav thật sự
+      const source = ctx.createBufferSource();
+      source.buffer = bufferRef.current;
+      source.connect(ctx.destination);
+      source.start();
+    } else {
+      // Nếu chưa có buffer, phát beep ngắn bằng oscillator
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = 880;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.5;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    }
+  };
 
   useEffect(() => {
     const fetchSongs = async () => {
@@ -334,6 +359,41 @@ export default function SongListPage() {
           </Button>
         </Box>
       </HStack>
+      {/* Luôn hiện nút audio controls, không ẩn */}
+      <Box mb={3} textAlign="center">
+        <Button
+          variant="outline"
+          colorScheme="orange"
+          borderRadius="lg"
+          padding="2px 8px"
+          height="auto"
+          minWidth="0"
+          border="none"
+          _hover={{ bg: "orange.50" }}
+          style={{ boxShadow: "none", fontWeight: "600", fontSize: "1em" }}
+          leftIcon={
+            <audio
+              controls
+              src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAACABAAZGF0YQAAAAAAABQAAAD/AAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAADAAD/AAABAAA="
+              style={{
+                width: 90,
+                height: 32,
+                verticalAlign: "middle",
+                marginRight: 8,
+                borderRadius: 6,
+                background: "#fff",
+                boxShadow: "0 0 2px #0002",
+                border: "1px solid #f6ad55",
+                display: "inline-block",
+              }}
+              onPlay={handleTestAudioPlay}
+              tabIndex={0}
+            />
+          }
+        >
+          Nhấn để bật tiếng
+        </Button>
+      </Box>
       {loading ? (
         <Spinner />
       ) : (
@@ -348,10 +408,10 @@ export default function SongListPage() {
           >
             <colgroup>
               <col
-                style={{ width: nameColWidth, minWidth: 0, maxWidth: "56vw" }} // giảm maxWidth
+                style={{ width: nameColWidth, minWidth: 0, maxWidth: "56vw" }}
               />
               <col
-                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "20vw" }} // tăng maxWidth
+                style={{ width: tempoColWidth, minWidth: 0, maxWidth: "20vw" }}
               />
               <col
                 style={{
