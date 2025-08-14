@@ -66,8 +66,12 @@ export default function SongListPage() {
   const [activeSongId, setActiveSongId] = useState(null);
   const [activeTempo, setActiveTempo] = useState(null);
   const [modalSong, setModalSong] = useState(null);
-  const [flashRow, setFlashRow] = useState(null);
   const [tickCount, setTickCount] = useState(0);
+
+  const [flashRow, setFlashRow] = useState(null);
+  const [fadePercent, setFadePercent] = useState(0);
+  const fadeRaf = useRef(null);
+  const fadeStartTime = useRef(0);
 
   const [search, setSearch] = useState("");
   const searchRef = useRef();
@@ -78,7 +82,7 @@ export default function SongListPage() {
 
   const toast = useToast();
 
-  // Responsive tweaks for iPhone mini
+  // Responsive tweaks
   const toolbarPadding = useBreakpointValue({
     base: "6px 2px 6px 2px",
     md: "10px 12px 8px 12px",
@@ -99,7 +103,6 @@ export default function SongListPage() {
     base: "32px",
     md: "38px",
   });
-  // Reduce minW to fit all buttons on small screens
   const buttonMinW = useBreakpointValue({
     base: "84px",
     sm: "92px",
@@ -110,21 +113,83 @@ export default function SongListPage() {
     md: "140px",
   });
 
+  const nameColWidth = useBreakpointValue({
+    base: "56vw",
+    md: "180px",
+    lg: "200px",
+  });
+  const tempoColWidth = useBreakpointValue({
+    base: "20vw",
+    md: "70px",
+    lg: "90px",
+  });
+  const iconColWidth = useBreakpointValue({
+    base: "36px",
+    md: "36px",
+    lg: "36px",
+  });
+  const cellPadding = useBreakpointValue({
+    base: "8px",
+    md: "10px",
+    lg: "16px",
+  });
+  const rowSpacing = useBreakpointValue({
+    base: "10px",
+    md: "8px",
+  });
+
   // Metronome scheduler
   const { ensureAudioReady } = useMetronomeScheduler({
     bpm: activeTempo,
     isActive: !!activeSongId,
     onTick: useCallback(() => {
+      // Always clear previous fade animation before starting
+      if (fadeRaf.current) {
+        cancelAnimationFrame(fadeRaf.current);
+        fadeRaf.current = null;
+      }
+
       setFlashRow(activeSongId);
-      setTickCount((prev) => prev + 1);
-      setTimeout(() => setFlashRow(null), 100);
-    }, [activeSongId]),
+      setFadePercent(0);
+      fadeStartTime.current = Date.now();
+
+      const msPerTick = activeTempo ? 60000 / activeTempo : 500;
+
+      // Fade from teal.400 to teal.100 over the full tick
+      function fade() {
+        const elapsed = Date.now() - fadeStartTime.current;
+        let percent = Math.min(elapsed / msPerTick, 1);
+        setFadePercent(percent);
+
+        if (percent < 1) {
+          fadeRaf.current = requestAnimationFrame(fade);
+        } else {
+          setFlashRow(null);
+          fadeRaf.current = null;
+        }
+      }
+      fadeRaf.current = requestAnimationFrame(fade);
+
+      // Cleanup if tick changes or component unmounts
+      return () => {
+        if (fadeRaf.current) {
+          cancelAnimationFrame(fadeRaf.current);
+          fadeRaf.current = null;
+        }
+      };
+    }, [activeSongId, activeTempo]),
   });
 
-  // Ref cho audio element của nút unlock
+  useEffect(() => {
+    return () => {
+      if (fadeRaf.current) {
+        cancelAnimationFrame(fadeRaf.current);
+      }
+    };
+  }, []);
+
   const audioUnlockRef = useRef();
 
-  // Popup cho phép bật tiếng
   const [showAudioPopup, setShowAudioPopup] = useState(true);
 
   const handleCloseAudioPopup = () => setShowAudioPopup(false);
@@ -138,7 +203,6 @@ export default function SongListPage() {
     setShowAudioPopup(false);
   };
 
-  // Nút bật tiếng: giống hệt v62
   const handlePlayAudioUnlock = async () => {
     if (audioUnlockRef.current) {
       try {
@@ -187,31 +251,6 @@ export default function SongListPage() {
       setTickCount(0);
     }
   }, [tickCount, activeSongId]);
-
-  const nameColWidth = useBreakpointValue({
-    base: "56vw",
-    md: "180px",
-    lg: "200px",
-  });
-  const tempoColWidth = useBreakpointValue({
-    base: "20vw",
-    md: "70px",
-    lg: "90px",
-  });
-  const iconColWidth = useBreakpointValue({
-    base: "36px",
-    md: "36px",
-    lg: "36px",
-  });
-  const cellPadding = useBreakpointValue({
-    base: "8px",
-    md: "10px",
-    lg: "16px",
-  });
-  const rowSpacing = useBreakpointValue({
-    base: "10px",
-    md: "8px",
-  });
 
   const handleSwipeStart = (e, songId) => {
     let x = null;
@@ -360,9 +399,22 @@ export default function SongListPage() {
     }
   };
 
+  // Hàm lấy màu fade động cho nháy tempo, chuyển từ xanh đậm (#38B2AC) về xanh nhạt nhất (#E6FFFA)
+  function getFadeBg(flash, percent, active, id) {
+    if (flash === id) {
+      // Interpolate từ teal.400 về teal.100 theo percent
+      const from = [56, 178, 172]; // teal.400
+      const to = [230, 255, 250]; // teal.100
+      const c = from.map((v, i) => Math.round(v + (to[i] - v) * percent));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    } else if (active === id) {
+      return "#B2F5EA"; // teal.100 nhạt nhất
+    }
+    return undefined;
+  }
+
   return (
     <Box maxW="600px" mx="auto" p={{ base: 1, md: 2 }}>
-      {/* Popup unlock audio, handle giống hệt nút bật tiếng v62, chỉ khác chữ "cho phép" */}
       <Modal isOpen={showAudioPopup} onClose={handleCloseAudioPopup} isCentered>
         <ModalOverlay />
         <ModalContent maxW="340px">
@@ -407,7 +459,6 @@ export default function SongListPage() {
           </ModalFooter>
         </ModalContent>
       </Modal>
-      {/* Sticky toolbar */}
       <Box
         position="sticky"
         top={0}
@@ -553,163 +604,170 @@ export default function SongListPage() {
               </Tr>
             </Thead>
             <Tbody>
-              {sortedSongs.map((song, idx) => (
-                <Tr
-                  key={song.id}
-                  bg={
-                    flashRow === song.id
-                      ? "teal.400"
-                      : activeSongId === song.id
-                      ? "teal.100"
-                      : undefined
-                  }
-                  style={{
-                    transition: "background 0.08s",
-                  }}
-                  onTouchStart={(e) => handleSwipeStart(e, song.id)}
-                  onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
-                  onMouseDown={(e) => handleSwipeStart(e, song.id)}
-                  onMouseUp={(e) => handleSwipeEnd(e, song.id)}
-                >
-                  <Td
+              {sortedSongs.map((song, idx) => {
+                const bgColor = getFadeBg(
+                  flashRow,
+                  fadePercent,
+                  activeSongId,
+                  song.id
+                );
+                return (
+                  <Tr
+                    key={song.id}
+                    bg={bgColor}
                     style={{
-                      cursor: editMode ? "default" : "pointer",
-                      fontWeight: "bold",
-                      maxWidth: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      paddingLeft: cellPadding,
-                      paddingRight: "2px",
-                      paddingTop:
-                        idx === 0
-                          ? cellPadding
-                          : `calc(${cellPadding} + ${rowSpacing})`,
-                      paddingBottom: cellPadding,
-                      fontSize: "1em",
-                      background: "inherit",
+                      transition:
+                        flashRow === song.id ? "background 0.08s" : "none",
                     }}
-                    onClick={() => handleRowClick(song)}
-                    title={song.name}
+                    onTouchStart={(e) => handleSwipeStart(e, song.id)}
+                    onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
+                    onMouseDown={(e) => handleSwipeStart(e, song.id)}
+                    onMouseUp={(e) => handleSwipeEnd(e, song.id)}
                   >
-                    {song.name}
-                    {systemSongId === song.id && (
-                      <span
-                        style={{ marginLeft: 6 }}
-                        title="Đang đồng bộ hệ thống"
-                      >
-                        🔗
-                      </span>
-                    )}
-                  </Td>
-                  <Td
-                    textAlign="center"
-                    style={{
-                      cursor: editMode ? "default" : "pointer",
-                      fontWeight: "bold",
-                      color: activeSongId === song.id ? "teal" : undefined,
-                      paddingLeft: "2px",
-                      paddingRight: "2px",
-                      paddingTop:
-                        idx === 0
-                          ? cellPadding
-                          : `calc(${cellPadding} + ${rowSpacing})`,
-                      paddingBottom: cellPadding,
-                      fontSize: "1em",
-                      background: "inherit",
-                    }}
-                    onClick={() => handleTempoClick(song)}
-                  >
-                    {song.tempo || 120}
-                    {activeSongId === song.id && (
-                      <span style={{ marginLeft: 8 }}>🔊</span>
-                    )}
-                  </Td>
-                  <Td
-                    textAlign="center"
-                    p={0}
-                    style={{
-                      paddingTop:
-                        idx === 0
-                          ? cellPadding
-                          : `calc(${cellPadding} + ${rowSpacing})`,
-                      paddingBottom: cellPadding,
-                      background: "inherit",
-                    }}
-                  >
-                    {editMode ? (
-                      <Flex
-                        w="100%"
-                        minW={iconColWidth}
-                        justify="space-between"
-                        align="center"
-                      >
-                        <Box
-                          flex="1"
-                          display="flex"
-                          justifyContent="flex-start"
+                    <Td
+                      style={{
+                        cursor: editMode ? "default" : "pointer",
+                        fontWeight: "bold",
+                        maxWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        paddingLeft: cellPadding,
+                        paddingRight: "2px",
+                        paddingTop:
+                          idx === 0
+                            ? cellPadding
+                            : `calc(${cellPadding} + ${rowSpacing})`,
+                        paddingBottom: cellPadding,
+                        fontSize: "1em",
+                        background: "inherit",
+                      }}
+                      onClick={() => handleRowClick(song)}
+                      title={song.name}
+                    >
+                      {song.name}
+                      {systemSongId === song.id && (
+                        <span
+                          style={{ marginLeft: 6 }}
+                          title="Đang đồng bộ hệ thống"
                         >
-                          <IconButton
-                            aria-label="Pin"
-                            icon={<FaThumbtack />}
-                            size="xs"
-                            colorScheme={song.pinned ? "red" : "gray"}
-                            variant="ghost"
-                            style={{
-                              color: song.pinned ? "#e53e3e" : "#bbb",
-                              opacity: song.pinned ? 1 : 0.5,
-                              fontSize: "13px",
-                              padding: 0,
-                              minWidth: "16px",
-                              width: "16px",
-                              height: "16px",
-                            }}
-                            onClick={(e) => handlePinSong(song, e)}
-                            mr={0}
-                            tabIndex={0}
-                          />
-                        </Box>
-                        <Box flex="1" display="flex" justifyContent="flex-end">
-                          <IconButton
-                            aria-label="Delete"
-                            icon={<DeleteIcon />}
-                            size="xs"
-                            colorScheme="red"
-                            variant="ghost"
-                            style={{
-                              fontSize: "13px",
-                              padding: 0,
-                              minWidth: "16px",
-                              width: "16px",
-                              height: "16px",
-                            }}
-                            onClick={(e) => handleDeleteSong(song, e)}
-                            tabIndex={0}
-                          />
-                        </Box>
-                      </Flex>
-                    ) : (
-                      song.pinned && (
-                        <Box
-                          display="flex"
-                          justifyContent="center"
-                          alignItems="center"
-                          w="16px"
-                          h="16px"
-                          mx="auto"
-                          style={{ fontSize: "12px" }}
+                          🔗
+                        </span>
+                      )}
+                    </Td>
+                    <Td
+                      textAlign="center"
+                      style={{
+                        cursor: editMode ? "default" : "pointer",
+                        fontWeight: "bold",
+                        color: activeSongId === song.id ? "teal" : undefined,
+                        paddingLeft: "2px",
+                        paddingRight: "2px",
+                        paddingTop:
+                          idx === 0
+                            ? cellPadding
+                            : `calc(${cellPadding} + ${rowSpacing})`,
+                        paddingBottom: cellPadding,
+                        fontSize: "1em",
+                        background: "inherit",
+                      }}
+                      onClick={() => handleTempoClick(song)}
+                    >
+                      {song.tempo || 120}
+                      {activeSongId === song.id && (
+                        <span style={{ marginLeft: 8 }}>🔊</span>
+                      )}
+                    </Td>
+                    <Td
+                      textAlign="center"
+                      p={0}
+                      style={{
+                        paddingTop:
+                          idx === 0
+                            ? cellPadding
+                            : `calc(${cellPadding} + ${rowSpacing})`,
+                        paddingBottom: cellPadding,
+                        background: "inherit",
+                      }}
+                    >
+                      {editMode ? (
+                        <Flex
+                          w="100%"
+                          minW={iconColWidth}
+                          justify="space-between"
+                          align="center"
                         >
-                          <FaThumbtack
-                            color="#e53e3e"
-                            size={12}
-                            style={{ opacity: 0.85 }}
-                          />
-                        </Box>
-                      )
-                    )}
-                  </Td>
-                </Tr>
-              ))}
+                          <Box
+                            flex="1"
+                            display="flex"
+                            justifyContent="flex-start"
+                          >
+                            <IconButton
+                              aria-label="Pin"
+                              icon={<FaThumbtack />}
+                              size="xs"
+                              colorScheme={song.pinned ? "red" : "gray"}
+                              variant="ghost"
+                              style={{
+                                color: song.pinned ? "#e53e3e" : "#bbb",
+                                opacity: song.pinned ? 1 : 0.5,
+                                fontSize: "13px",
+                                padding: 0,
+                                minWidth: "16px",
+                                width: "16px",
+                                height: "16px",
+                              }}
+                              onClick={(e) => handlePinSong(song, e)}
+                              mr={0}
+                              tabIndex={0}
+                            />
+                          </Box>
+                          <Box
+                            flex="1"
+                            display="flex"
+                            justifyContent="flex-end"
+                          >
+                            <IconButton
+                              aria-label="Delete"
+                              icon={<DeleteIcon />}
+                              size="xs"
+                              colorScheme="red"
+                              variant="ghost"
+                              style={{
+                                fontSize: "13px",
+                                padding: 0,
+                                minWidth: "16px",
+                                width: "16px",
+                                height: "16px",
+                              }}
+                              onClick={(e) => handleDeleteSong(song, e)}
+                              tabIndex={0}
+                            />
+                          </Box>
+                        </Flex>
+                      ) : (
+                        song.pinned && (
+                          <Box
+                            display="flex"
+                            justifyContent="center"
+                            alignItems="center"
+                            w="16px"
+                            h="16px"
+                            mx="auto"
+                            style={{ fontSize: "12px" }}
+                          >
+                            <FaThumbtack
+                              color="#e53e3e"
+                              size={12}
+                              style={{ opacity: 0.85 }}
+                            />
+                          </Box>
+                        )
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
               {sortedSongs.length > 0 && (
                 <Tr>
                   <Td
