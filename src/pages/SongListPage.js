@@ -71,6 +71,7 @@ export default function SongListPage() {
 
   const [rowAnimState, setRowAnimState] = useState({}); // { rowId: "flash" | "fade" | "done" }
   const fadeTimeouts = useRef({}); // { rowId: [timeoutId1, timeoutId2] }
+  const songRowRefs = useRef({}); // { songId: rowRef }
 
   const [search, setSearch] = useState("");
   const searchRef = useRef();
@@ -150,19 +151,24 @@ export default function SongListPage() {
 
   // Animation logic using CSS className and transition-duration
   function startRowAnim(rowId, msPerTick) {
+    // Chỉ chạy nháy màu nếu rowId === activeSongId (đảm bảo đúng bài)
+    if (rowId !== activeSongId) return;
+
     // Clear previous timeouts for this row
     if (fadeTimeouts.current[rowId]) {
       fadeTimeouts.current[rowId].forEach((t) => clearTimeout(t));
     }
     // Set "flash" state
-    setRowAnimState((prev) => ({ ...prev, [rowId]: "flash" }));
+    setRowAnimState((prev) => ({ [rowId]: "flash" }));
     // After 120ms, switch to "fade"
     const t1 = setTimeout(() => {
-      setRowAnimState((prev) => ({ ...prev, [rowId]: "fade" }));
+      if (rowId === activeSongId)
+        setRowAnimState((prev) => ({ [rowId]: "fade" }));
     }, 120);
     // After msPerTick, switch to "done"
     const t2 = setTimeout(() => {
-      setRowAnimState((prev) => ({ ...prev, [rowId]: "done" }));
+      if (rowId === activeSongId)
+        setRowAnimState((prev) => ({ [rowId]: "done" }));
     }, msPerTick);
     fadeTimeouts.current[rowId] = [t1, t2];
   }
@@ -237,6 +243,27 @@ export default function SongListPage() {
       setTickCount(0);
     }
   }, [tickCount, activeSongId]);
+
+  // SCROLL TO ACTIVE ROW WHEN ACTIVE SONG CHANGES
+  useEffect(() => {
+    if (!activeSongId) return;
+    setTimeout(() => {
+      const rowRef = songRowRefs.current[activeSongId];
+      if (rowRef && rowRef.current && rowRef.current.scrollIntoView) {
+        // Tính toán vị trí để bài hát nằm giữa màn hình
+        const rowRect = rowRef.current.getBoundingClientRect();
+        const viewportHeight =
+          window.innerHeight || document.documentElement.clientHeight;
+        const scrollY = window.scrollY || window.pageYOffset;
+        const targetY =
+          rowRect.top + scrollY - viewportHeight / 2 + rowRect.height / 2;
+        window.scrollTo({
+          top: targetY,
+          behavior: "smooth",
+        });
+      }
+    }, 350); // delay để đảm bảo màu nháy đã apply, table đã render
+  }, [activeSongId, songs.length]);
 
   const handleSwipeStart = (e, songId) => {
     let x = null;
@@ -390,7 +417,6 @@ export default function SongListPage() {
         updatedAt: Date.now(),
       });
       // KHÔNG gọi startRowAnim ở đây, để metronome tick tự lo nháy màu!
-      // (Nếu muốn flash khi click thì chỉ flash 1 lần, không nên chồng animation)
     }
   };
 
@@ -620,6 +646,9 @@ export default function SongListPage() {
             </Thead>
             <Tbody>
               {sortedSongs.map((song, idx) => {
+                if (!songRowRefs.current[song.id]) {
+                  songRowRefs.current[song.id] = React.createRef();
+                }
                 const rowClass = getRowAnimClass(
                   song.id,
                   activeTempo ? 60000 / activeTempo : 500
@@ -628,6 +657,7 @@ export default function SongListPage() {
                 return (
                   <Tr
                     key={song.id}
+                    ref={songRowRefs.current[song.id]}
                     className={rowClass}
                     style={rowStyle}
                     onTouchStart={(e) => handleSwipeStart(e, song.id)}
