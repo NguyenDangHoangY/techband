@@ -40,7 +40,7 @@ import {
 } from "firebase/firestore";
 import SongDetailModal from "../components/SongDetailModal";
 import useMetronomeScheduler from "../components/MetronomeScheduler";
-import "./SongListPage.css"; // import CSS file
+import "./SongListPage.css";
 
 const seedSongs = async () => {
   for (const song of songsSeed) {
@@ -64,22 +64,27 @@ const MIN_SWIPE_DISTANCE = 50; // px
 export default function SongListPage() {
   const [songs, setSongs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeSongId, setActiveSongId] = useState(null);
-  const [activeTempo, setActiveTempo] = useState(null);
+
+  // State đồng bộ từ Firestore
+  const [systemSongId, setSystemSongId] = useState(null);
+  const [systemTempo, setSystemTempo] = useState(null);
+
+  // State cho animation, modal, tìm kiếm, edit mode, swipe
   const [modalSong, setModalSong] = useState(null);
-  const [tickCount, setTickCount] = useState(0);
-
-  const [rowAnimState, setRowAnimState] = useState({}); // { rowId: "flash" | "fade" | "done" }
-  const fadeTimeouts = useRef({}); // { rowId: [timeoutId1, timeoutId2] }
-  const songRowRefs = useRef({}); // { songId: rowRef }
-
+  const [rowAnimState, setRowAnimState] = useState({});
+  const fadeTimeouts = useRef({});
+  const songRowRefs = useRef({});
   const [search, setSearch] = useState("");
   const searchRef = useRef();
   const [editMode, setEditMode] = useState(false);
   const swipeStartXRef = useRef(null);
   const swipeActiveRowRef = useRef(null);
-  const [systemSongId, setSystemSongId] = useState(null);
 
+  // unlock audio context
+  const audioUnlockRef = useRef();
+  const [showAudioPopup, setShowAudioPopup] = useState(true);
+
+  // toast
   const toast = useToast();
 
   // Responsive tweaks
@@ -139,30 +144,52 @@ export default function SongListPage() {
     lg: "12px",
   });
 
-  // Metronome scheduler
-  const { ensureAudioReady } = useMetronomeScheduler({
-    bpm: activeTempo,
-    isActive: !!activeSongId,
+  // Metronome scheduler - log các sự kiện callback
+  const { ensureAudioReady, testTick } = useMetronomeScheduler({
+    bpm: systemTempo,
+    isActive: !!systemSongId,
     onTick: useCallback(() => {
-      if (!activeSongId) return;
-      const msPerTick = activeTempo ? 60000 / activeTempo : 500;
-      startRowAnim(activeSongId, msPerTick);
-    }, [activeSongId, activeTempo]),
+      console.log(
+        "[SongListPage] onTick called. systemSongId:",
+        systemSongId,
+        "systemTempo:",
+        systemTempo
+      );
+      if (!systemSongId) return;
+      const msPerTick = systemTempo ? 60000 / systemTempo : 500;
+      startRowAnim(systemSongId, msPerTick);
+    }, [systemSongId, systemTempo]),
+    onStop: useCallback(() => {
+      console.log("[SongListPage] onStop called. systemSongId:", systemSongId);
+      if (systemSongId) {
+        const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
+        setDoc(systemStateRef, {});
+        setSystemSongId(null);
+        setSystemTempo(null);
+      }
+    }, [systemSongId]),
   });
+
+  useEffect(() => {
+    if (systemSongId && systemTempo) {
+      ensureAudioReady();
+    }
+    // eslint-disable-next-line
+  }, [systemSongId, systemTempo]);
 
   // Animation logic using CSS className and transition-duration
   function startRowAnim(rowId, msPerTick) {
-    if (rowId !== activeSongId) return;
+    if (rowId !== systemSongId) return;
     if (fadeTimeouts.current[rowId]) {
       fadeTimeouts.current[rowId].forEach((t) => clearTimeout(t));
     }
     setRowAnimState((prev) => ({ [rowId]: "flash" }));
     const t1 = setTimeout(() => {
-      if (rowId === activeSongId)
+      if (rowId === systemSongId)
         setRowAnimState((prev) => ({ [rowId]: "fade" }));
     }, 120);
     const t2 = setTimeout(() => {
-      if (rowId === activeSongId)
+      if (rowId === systemSongId)
         setRowAnimState((prev) => ({ [rowId]: "done" }));
     }, msPerTick);
     fadeTimeouts.current[rowId] = [t1, t2];
@@ -174,12 +201,9 @@ export default function SongListPage() {
     };
   }, []);
 
-  const audioUnlockRef = useRef();
-
-  const [showAudioPopup, setShowAudioPopup] = useState(true);
-
   const handleCloseAudioPopup = () => setShowAudioPopup(false);
 
+  // SỬA: Bấm "Cho phép" chỉ play audio element như cũ (giữ lại cho UX cũ)
   const handlePlayAudioAllow = async () => {
     if (audioUnlockRef.current) {
       try {
@@ -189,14 +213,13 @@ export default function SongListPage() {
     setShowAudioPopup(false);
   };
 
+  // SỬA: Bấm "Bật tiếng" sẽ gọi testTick() để phát tick bằng Web Audio API
   const handlePlayAudioUnlock = async () => {
-    if (audioUnlockRef.current) {
-      try {
-        await audioUnlockRef.current.play();
-      } catch (e) {}
-    }
+    await ensureAudioReady();
+    await testTick();
   };
 
+  // Fetch songs list
   useEffect(() => {
     const fetchSongs = async () => {
       setLoading(true);
@@ -211,54 +234,47 @@ export default function SongListPage() {
     fetchSongs();
   }, []);
 
+  // LẮNG NGHE state đồng bộ từ Firestore
   useEffect(() => {
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
     const unsubscribe = onSnapshot(systemStateRef, (snap) => {
       const data = snap.data();
+      console.log("[SongListPage] Firestore snapshot", data);
       if (data && data.songId) {
         setSystemSongId(data.songId);
-        setActiveSongId(data.songId);
-        setActiveTempo(data.tempo || 120);
-        setTickCount(0);
+        setSystemTempo(data.tempo || 120);
       } else {
         setSystemSongId(null);
-        setActiveSongId(null);
-        setActiveTempo(null);
-        setTickCount(0);
+        setSystemTempo(null);
       }
     });
     return () => unsubscribe();
   }, []);
 
+  // Scroll tới bài đang được chọn (theo Firestore)
   useEffect(() => {
-    if (tickCount >= MAX_TICKS && activeSongId) {
-      setActiveSongId(null);
-      setActiveTempo(null);
-      setTickCount(0);
-    }
-  }, [tickCount, activeSongId]);
-
-  // SCROLL TO ACTIVE ROW WHEN ACTIVE SONG CHANGES
-  useEffect(() => {
-    if (!activeSongId) return;
+    if (!systemSongId) return;
     setTimeout(() => {
-      const rowRef = songRowRefs.current[activeSongId];
+      const rowRef = songRowRefs.current[systemSongId];
       if (rowRef && rowRef.current && rowRef.current.scrollIntoView) {
         const rowRect = rowRef.current.getBoundingClientRect();
         const viewportHeight =
           window.innerHeight || document.documentElement.clientHeight;
         const scrollY = window.scrollY || window.pageYOffset;
         const targetY =
-          rowRect.top + scrollY - viewportHeight / 2 + rowRect.height / 2;
+          rowRect.top +
+          scrollY -
+          viewportHeight / 2 +
+          rowRef.current.offsetHeight / 2;
         window.scrollTo({
           top: targetY,
           behavior: "smooth",
         });
       }
     }, 350);
-  }, [activeSongId, songs.length]);
+  }, [systemSongId, songs.length]);
 
-  // xử lý vuốt sang trái/phải để mở/tắt edit mode
+  // Vuốt sang trái/phải để mở/tắt edit mode
   const handleSwipeStart = (e, songId) => {
     let x = null;
     if (e.touches && e.touches.length > 0) {
@@ -329,17 +345,20 @@ export default function SongListPage() {
       ),
   ];
 
+  // Khi state đồng bộ đổi: reset animation, luôn play metronome nếu có bài được chọn
   useEffect(() => {
     Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
     fadeTimeouts.current = {};
     setRowAnimState({});
-    if (activeSongId && activeTempo) {
-      startRowAnim(activeSongId, 60000 / activeTempo);
-    } else if (activeSongId) {
-      startRowAnim(activeSongId, 500);
+    // Trigger 1 tick animation ngay
+    if (systemSongId && systemTempo) {
+      startRowAnim(systemSongId, 60000 / systemTempo);
+    } else if (systemSongId) {
+      startRowAnim(systemSongId, 500);
     }
-  }, [activeSongId, activeTempo]);
+  }, [systemSongId, systemTempo]);
 
+  // Các hàm thao tác dữ liệu
   const handlePinSong = async (song, e) => {
     e.stopPropagation();
     if (song.pinned) {
@@ -385,18 +404,16 @@ export default function SongListPage() {
     });
   };
 
+  // GHI vào Firestore, mọi máy đều chạy metronome qua state Firestore
   const handleTempoClick = async (song) => {
     if (editMode) return;
     await ensureAudioReady();
     const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
-
     setRowAnimState({});
-
     if (systemSongId === song.id) {
       await setDoc(systemStateRef, {});
-      setActiveSongId(null);
-      setActiveTempo(null);
-      setTickCount(0);
+      setSystemSongId(null);
+      setSystemTempo(null);
     } else {
       await setDoc(systemStateRef, {
         songId: song.id,
@@ -421,7 +438,7 @@ export default function SongListPage() {
 
   function getRowAnimClass(rowId, msPerTick) {
     const state = rowAnimState[rowId];
-    if (!state && activeSongId === rowId) {
+    if (!state && systemSongId === rowId) {
       return "tr-done";
     }
     if (!state) return "";
@@ -433,7 +450,7 @@ export default function SongListPage() {
 
   function getRowAnimStyle(rowId) {
     const msPerTick =
-      activeSongId === rowId ? (activeTempo ? 60000 / activeTempo : 500) : 500;
+      systemSongId === rowId ? (systemTempo ? 60000 / systemTempo : 500) : 500;
     return {
       "--fade-duration": `${msPerTick}ms`,
     };
@@ -576,6 +593,7 @@ export default function SongListPage() {
           position: "absolute",
         }}
         tabIndex={-1}
+        onPlay={() => console.log("[SongListPage] audioUnlockRef played")}
       />
       {loading ? (
         <Spinner />
@@ -636,7 +654,7 @@ export default function SongListPage() {
                 }
                 const rowClass = getRowAnimClass(
                   song.id,
-                  activeTempo ? 60000 / activeTempo : 500
+                  systemTempo ? 60000 / systemTempo : 500
                 );
                 const rowStyle = getRowAnimStyle(song.id);
                 return (
@@ -688,7 +706,7 @@ export default function SongListPage() {
                       style={{
                         cursor: editMode ? "default" : "pointer",
                         fontWeight: "bold",
-                        color: activeSongId === song.id ? "teal" : undefined,
+                        color: systemSongId === song.id ? "teal" : undefined,
                         paddingLeft: "2px",
                         paddingRight: "2px",
                         paddingTop: cellPadding + rowSpacing,
@@ -704,7 +722,7 @@ export default function SongListPage() {
                       onClick={() => handleTempoClick(song)}
                     >
                       {song.tempo || 120}
-                      {activeSongId === song.id && (
+                      {systemSongId === song.id && (
                         <span style={{ marginLeft: 8 }}>🔊</span>
                       )}
                     </Td>
