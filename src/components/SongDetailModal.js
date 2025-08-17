@@ -21,7 +21,29 @@ import {
 import { FaBold, FaItalic } from "react-icons/fa";
 import { db } from "../firebase";
 import { doc, updateDoc } from "firebase/firestore";
-import ReactMarkdown from "react-markdown";
+
+// Hàm nhỏ thay thế markdown bold/italic sang HTML
+function simpleMarkdownToHtml(text) {
+  if (!text) return "";
+
+  // Thay thế **text** thành <strong>text</strong>
+  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Thay thế *text* thành <em>text</em>
+  text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Loại bỏ nguy cơ XSS rất đơn giản bằng cách escape < > & " '
+  text = text
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  // Sau khi escape, trả lại các thẻ strong/em an toàn
+  text = text
+    .replace(/&lt;strong&gt;/g, "<strong>")
+    .replace(/&lt;\/strong&gt;/g, "</strong>")
+    .replace(/&lt;em&gt;/g, "<em>")
+    .replace(/&lt;\/em&gt;/g, "</em>");
+  return text;
+}
 
 const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
   const [name, setName] = useState("");
@@ -116,6 +138,8 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
     }, 2500);
   };
 
+  const noteFontSize = "1.1em";
+
   return (
     <Modal
       isOpen={isOpen}
@@ -138,7 +162,7 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
       >
         <ModalCloseButton zIndex={2} />
         <ModalBody pt={8} pb={6} px={[2, 8]}>
-          {/* Tên bài hát - màu đen */}
+          {/* Tên bài hát */}
           <Box
             textAlign="center"
             fontSize={["2xl", "3xl"]}
@@ -166,7 +190,7 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
               name
             )}
           </Box>
-          {/* Tempo nhạc lý, căn trái, màu đen, không BPM */}
+          {/* Tempo */}
           <Box
             display="flex"
             alignItems="center"
@@ -202,15 +226,15 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
                   />
                 </NumberInput>
                 <Button
-                  size="lg" // Tăng kích thước nút Tab tempo
+                  size="lg"
                   colorScheme="blue"
                   variant="outline"
                   onClick={handleTapTempo}
                   type="button"
                   ml={2}
-                  px={8} // Tăng chiều ngang nút
-                  fontSize="xl" // Tăng font chữ
-                  height="52px" // Tăng chiều cao nút trên mobile
+                  px={8}
+                  fontSize="xl"
+                  height="52px"
                 >
                   Tab tempo
                 </Button>
@@ -232,19 +256,20 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
               Nhấn theo nhịp điệu bài hát, tempo sẽ tự động cập nhật.
             </Text>
           )}
-          {/* Note: Markdown, không font handwriting */}
+
+          {/* Note - preview giữ đúng mọi space, mọi dòng, chỉ hỗ trợ bold/italic */}
           <Box
             mt={2}
-            p={5}
             bg="gray.50"
             borderRadius="lg"
             boxShadow="sm"
-            fontSize="xl"
+            fontSize={noteFontSize}
             minH="160px"
             color="gray.800"
             style={{
-              whiteSpace: "pre-wrap",
               letterSpacing: "0.01em",
+              padding: "6px",
+              overflowX: "auto",
             }}
             position="relative"
           >
@@ -277,34 +302,31 @@ const SongDetailModal = ({ song, isOpen, onClose, onSongUpdated }) => {
                 onChange={(e) => setNote(e.target.value)}
                 rows={8}
                 style={{
-                  fontSize: "1.6em", // Tăng font-size textarea
+                  fontSize: noteFontSize,
                   width: "100%",
                   background: "transparent",
                   border: "none",
                   resize: "vertical",
                   outline: "none",
                   fontFamily: "inherit",
-                  minHeight: "160px", // Tăng chiều cao tối thiểu
-                  padding: "10px 0",
+                  minHeight: "160px",
+                  padding: "6px 0",
+                  whiteSpace: "pre-wrap",
                 }}
                 placeholder="Ghi chú, lyric, hợp âm..."
               />
             ) : note ? (
-              <ReactMarkdown
-                components={{
-                  strong: ({ node, ...props }) => (
-                    <span style={{ fontWeight: "bold" }} {...props} />
-                  ),
-                  em: ({ node, ...props }) => (
-                    <span style={{ fontStyle: "italic" }} {...props} />
-                  ),
-                  p: ({ node, ...props }) => (
-                    <div style={{ margin: 0 }} {...props} />
-                  ),
+              <div
+                style={{
+                  fontFamily: "inherit",
+                  fontSize: noteFontSize,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
                 }}
-              >
-                {note}
-              </ReactMarkdown>
+                dangerouslySetInnerHTML={{
+                  __html: simpleMarkdownToHtml(note),
+                }}
+              />
             ) : (
               <Box color="gray.400" fontStyle="italic">
                 (Chưa có ghi chú cho bài hát này)

@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-const MAX_TICKS = 16;
+const MAX_TICKS = 32;
 
 export default function useMetronomeScheduler({
   bpm,
