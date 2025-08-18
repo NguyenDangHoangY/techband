@@ -81,9 +81,10 @@ export default function SongListPage() {
   const swipeStartXRef = useRef(null);
   const swipeActiveRowRef = useRef(null);
 
-  // Drag state for pinned song reordering
+  // Drag state for pinned songs
   const [draggedPinIdx, setDraggedPinIdx] = useState(null);
   const [dragOverPinIdx, setDragOverPinIdx] = useState(null);
+  const [pinnedSongsOrder, setPinnedSongsOrder] = useState(null);
 
   // unlock audio context
   const audioUnlockRef = useRef();
@@ -137,6 +138,11 @@ export default function SongListPage() {
     base: "36px",
     md: "36px",
     lg: "36px",
+  });
+  const moveIconColWidth = useBreakpointValue({
+    base: "20px",
+    md: "28px",
+    lg: "32px",
   });
   const cellPadding = useBreakpointValue({
     base: "8px",
@@ -332,7 +338,7 @@ export default function SongListPage() {
     );
   });
 
-  // Separate pinned and unpinned for easier drag logic
+  // Tách pinned và non-pinned, có thể reorder pinned
   const pinnedSongs = filteredSongs
     .filter((s) => s.pinned)
     .sort((a, b) => {
@@ -342,7 +348,7 @@ export default function SongListPage() {
       return 0;
     });
 
-  const unpinnedSongs = filteredSongs
+  const nonPinnedSongs = filteredSongs
     .filter((s) => !s.pinned)
     .sort((a, b) =>
       (a.name || "").localeCompare(b.name || "", undefined, {
@@ -350,7 +356,15 @@ export default function SongListPage() {
       })
     );
 
-  const sortedSongs = [...pinnedSongs, ...unpinnedSongs];
+  // Sắp xếp pinnedSongs theo thứ tự kéo thả tạm thời (nếu có)
+  const orderedPinnedSongs =
+    pinnedSongsOrder && pinnedSongsOrder.length === pinnedSongs.length
+      ? pinnedSongsOrder
+          .map((id) => pinnedSongs.find((s) => s.id === id))
+          .filter(Boolean)
+      : pinnedSongs;
+
+  const sortedSongs = [...orderedPinnedSongs, ...nonPinnedSongs];
 
   // Khi state đồng bộ đổi: reset animation, luôn play metronome nếu có bài được chọn
   useEffect(() => {
@@ -364,6 +378,63 @@ export default function SongListPage() {
       startRowAnim(systemSongId, 500);
     }
   }, [systemSongId, systemTempo]);
+
+  // Drag & drop handlers for pinned songs
+  function handleDragStartPin(idx, e) {
+    setDraggedPinIdx(idx);
+    setDragOverPinIdx(idx);
+    e.dataTransfer?.setData("text/plain", "dragging-pinned-song");
+    e.dataTransfer?.setDragImage?.(e.target, 16, 16);
+  }
+  function handleDragOverPin(idx, e) {
+    e.preventDefault();
+    setDragOverPinIdx(idx);
+  }
+  function handleDropPin(idx, e) {
+    e.preventDefault();
+    if (draggedPinIdx == null || draggedPinIdx === idx) {
+      setDraggedPinIdx(null);
+      setDragOverPinIdx(null);
+      return;
+    }
+    // Đổi thứ tự tạm thời
+    const newOrder = [...orderedPinnedSongs];
+    const [removed] = newOrder.splice(draggedPinIdx, 1);
+    newOrder.splice(idx, 0, removed);
+    setPinnedSongsOrder(newOrder.map((s) => s.id));
+    setDraggedPinIdx(null);
+    setDragOverPinIdx(null);
+    // Lưu vào firestore
+    setTimeout(() => {
+      const now = Date.now();
+      const batch = writeBatch(db);
+      newOrder.forEach((song, i) => {
+        // pinnedAt đảm bảo lệch nhau một chút để đúng thứ tự
+        batch.update(doc(db, "songs", song.id), { pinnedAt: now + i });
+      });
+      batch.commit();
+      // Cập nhật lại local
+      setSongs((prev) =>
+        prev.map((s) =>
+          s.pinned
+            ? {
+                ...s,
+                pinnedAt:
+                  newOrder.findIndex((x) => x.id === s.id) !== -1
+                    ? now + newOrder.findIndex((x) => x.id === s.id)
+                    : s.pinnedAt,
+              }
+            : s
+        )
+      );
+      setPinnedSongsOrder(null);
+    }, 80);
+  }
+  function handleDragEndPin() {
+    setDraggedPinIdx(null);
+    setDragOverPinIdx(null);
+    setPinnedSongsOrder(null);
+  }
 
   // Các hàm thao tác dữ liệu
   const handlePinSong = async (song, e) => {
@@ -463,69 +534,6 @@ export default function SongListPage() {
     };
   }
 
-  // --- Drag & drop for pinned song reordering ---
-
-  const handleDragStart = (idx, e) => {
-    setDraggedPinIdx(idx);
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", idx);
-    }
-  };
-
-  const handleDragOver = (idx, e) => {
-    e.preventDefault();
-    setDragOverPinIdx(idx);
-  };
-
-  const handleDrop = async (idx, e) => {
-    e.preventDefault();
-    if (draggedPinIdx === null || draggedPinIdx === undefined) return;
-    if (draggedPinIdx === idx) {
-      setDraggedPinIdx(null);
-      setDragOverPinIdx(null);
-      return;
-    }
-    let newPinned = [...pinnedSongs];
-    const moved = newPinned.splice(draggedPinIdx, 1)[0];
-    newPinned.splice(idx, 0, moved);
-
-    // Cập nhật thứ tự vào Firestore
-    const batch = writeBatch(db);
-    const now = Date.now();
-    newPinned.forEach((song, i) => {
-      // Đảm bảo thứ tự không bị đè
-      batch.update(doc(db, "songs", song.id), {
-        pinnedAt: now + i,
-      });
-    });
-    await batch.commit();
-
-    // Cập nhật local state (chỉ pinnedSongs, sẽ merge lại khi render sortedSongs)
-    setSongs((prev) => {
-      // update pinnedAt cho từng song trong pinnedSongs mới
-      const pinnedIds = newPinned.map((s) => s.id);
-      const pinnedAtMap = {};
-      newPinned.forEach((s, i) => {
-        pinnedAtMap[s.id] = now + i;
-      });
-      return prev.map((s) =>
-        pinnedIds.includes(s.id)
-          ? { ...s, pinnedAt: pinnedAtMap[s.id], pinned: true }
-          : s
-      );
-    });
-    setDraggedPinIdx(null);
-    setDragOverPinIdx(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedPinIdx(null);
-    setDragOverPinIdx(null);
-  };
-
-  // --- End drag logic ---
-
   return (
     <Box maxW="600px" mx="auto" p={{ base: 1, md: 2 }}>
       <Modal isOpen={showAudioPopup} onClose={handleCloseAudioPopup} isCentered>
@@ -536,8 +544,8 @@ export default function SongListPage() {
           </ModalHeader>
           <ModalBody>
             <Box fontSize="md" textAlign="center">
-              Để sử dụng tính năng phát tiếng metronome, vui lòng cấp quyền phát
-              âm thanh cho trình duyệt.
+              Để sử dụng tính năng nhịp/phát tiếng, vui lòng cấp quyền phát âm
+              thanh cho trình duyệt.
               <br />
               <br />
               Nhấn <b>Cho phép</b> để khởi động hệ thống âm thanh.
@@ -678,25 +686,19 @@ export default function SongListPage() {
             }}
           >
             <colgroup>
-              {/* Thêm cột kéo cho pinned songs khi editMode */}
-              {editMode && pinnedSongs.length > 0 ? (
-                <>
-                  <col
-                    style={{ width: "28px", minWidth: 0, maxWidth: "28px" }}
-                  />
-                  <col
-                    style={{
-                      width: nameColWidth,
-                      minWidth: 0,
-                      maxWidth: "56vw",
-                    }}
-                  />
-                </>
-              ) : (
+              {/* Thêm cột move icon khi editMode và là pinned song */}
+              {editMode ? (
                 <col
-                  style={{ width: nameColWidth, minWidth: 0, maxWidth: "56vw" }}
+                  style={{
+                    width: moveIconColWidth,
+                    minWidth: moveIconColWidth,
+                    maxWidth: moveIconColWidth,
+                  }}
                 />
-              )}
+              ) : null}
+              <col
+                style={{ width: nameColWidth, minWidth: 0, maxWidth: "56vw" }}
+              />
               <col
                 style={{ width: tempoColWidth, minWidth: 0, maxWidth: "20vw" }}
               />
@@ -710,8 +712,16 @@ export default function SongListPage() {
             </colgroup>
             <Thead>
               <Tr>
-                {/* Thêm cột kéo nếu có pinned và editMode */}
-                {editMode && pinnedSongs.length > 0 && <Th p={cellPadding} />}
+                {/* Thêm th cột move khi editMode */}
+                {editMode ? (
+                  <Th
+                    p={cellPadding}
+                    pr={1}
+                    minW={moveIconColWidth}
+                    maxW={moveIconColWidth}
+                    w={moveIconColWidth}
+                  ></Th>
+                ) : null}
                 <Th
                   whiteSpace="nowrap"
                   overflow="hidden"
@@ -736,8 +746,7 @@ export default function SongListPage() {
               </Tr>
             </Thead>
             <Tbody>
-              {/* Render pinned songs với kéo thả nếu editMode */}
-              {pinnedSongs.map((song, idx) => {
+              {sortedSongs.map((song, idx) => {
                 if (!songRowRefs.current[song.id]) {
                   songRowRefs.current[song.id] = React.createRef();
                 }
@@ -746,8 +755,18 @@ export default function SongListPage() {
                   systemTempo ? 60000 / systemTempo : 500
                 );
                 const rowStyle = getRowAnimStyle(song.id);
-                const isDragging = draggedPinIdx === idx;
-                const isDragOver = dragOverPinIdx === idx && !isDragging;
+                // Xác định là pinned và editMode
+                const isPinned = song.pinned;
+                // Tìm index trong orderedPinnedSongs (để drag)
+                const pinIdx = isPinned
+                  ? orderedPinnedSongs.findIndex((s) => s.id === song.id)
+                  : -1;
+                const isDragging =
+                  draggedPinIdx === pinIdx && draggedPinIdx !== null;
+                const isDragOver =
+                  dragOverPinIdx === pinIdx &&
+                  draggedPinIdx !== null &&
+                  draggedPinIdx !== dragOverPinIdx;
                 return (
                   <Tr
                     key={song.id}
@@ -755,52 +774,73 @@ export default function SongListPage() {
                     className={rowClass}
                     style={{
                       ...rowStyle,
-                      opacity: isDragging ? 0.3 : 1,
-                      background: isDragOver ? "#f5e7ff" : "inherit",
-                      transition: "background 0.15s",
+                      ...(isDragging
+                        ? { opacity: 0.5, background: "#e2e8f0" }
+                        : isDragOver
+                        ? { background: "#bee3f8" }
+                        : {}),
                     }}
                     onTouchStart={(e) => handleSwipeStart(e, song.id)}
                     onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
                     onMouseDown={(e) => handleSwipeStart(e, song.id)}
                     onMouseUp={(e) => handleSwipeEnd(e, song.id)}
-                    draggable={editMode}
+                    draggable={editMode && isPinned}
                     onDragStart={
-                      editMode ? (e) => handleDragStart(idx, e) : undefined
+                      editMode && isPinned
+                        ? (e) => handleDragStartPin(pinIdx, e)
+                        : undefined
                     }
                     onDragOver={
-                      editMode ? (e) => handleDragOver(idx, e) : undefined
+                      editMode && isPinned
+                        ? (e) => handleDragOverPin(pinIdx, e)
+                        : undefined
                     }
-                    onDrop={editMode ? (e) => handleDrop(idx, e) : undefined}
-                    onDragEnd={editMode ? handleDragEnd : undefined}
+                    onDrop={
+                      editMode && isPinned
+                        ? (e) => handleDropPin(pinIdx, e)
+                        : undefined
+                    }
+                    onDragEnd={
+                      editMode && isPinned ? handleDragEndPin : undefined
+                    }
                   >
-                    {/* Cột kéo di chuyển */}
-                    {editMode && (
+                    {/* Move icon - chỉ cho pinned và editMode */}
+                    {editMode ? (
                       <Td
+                        p={0}
+                        minW={moveIconColWidth}
+                        maxW={moveIconColWidth}
+                        w={moveIconColWidth}
                         style={{
-                          cursor: "grab",
-                          width: 0,
                           paddingLeft: "2px",
                           paddingRight: "2px",
-                          textAlign: "center",
-                          verticalAlign: "middle",
                           background: "inherit",
                           borderBottom:
-                            idx < pinnedSongs.length - 1 ||
-                            unpinnedSongs.length > 0
+                            idx < sortedSongs.length - 1
                               ? "1px solid #e2e8f0"
                               : undefined,
+                          verticalAlign: "middle",
                         }}
-                        onMouseDown={(e) => {
-                          // Để kích hoạt drag trên icon, tránh bị block bởi các event khác
-                          e.stopPropagation();
-                        }}
-                        title="Kéo để sắp xếp"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <FaGripVertical
-                          style={{ opacity: 0.85, fontSize: 16 }}
-                        />
+                        {isPinned ? (
+                          <span
+                            style={{
+                              cursor: "grab",
+                              opacity: 0.95,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              height: "28px",
+                              userSelect: "none",
+                            }}
+                            title="Kéo để sắp xếp"
+                          >
+                            <FaGripVertical />
+                          </span>
+                        ) : null}
                       </Td>
-                    )}
+                    ) : null}
                     <Td
                       style={{
                         cursor: editMode ? "default" : "pointer",
@@ -816,8 +856,7 @@ export default function SongListPage() {
                         fontSize: "1em",
                         background: "inherit",
                         borderBottom:
-                          idx < pinnedSongs.length - 1 ||
-                          unpinnedSongs.length > 0
+                          idx < sortedSongs.length - 1
                             ? "1px solid #e2e8f0"
                             : undefined,
                         verticalAlign: "middle",
@@ -848,8 +887,7 @@ export default function SongListPage() {
                         fontSize: "1em",
                         background: "inherit",
                         borderBottom:
-                          idx < pinnedSongs.length - 1 ||
-                          unpinnedSongs.length > 0
+                          idx < sortedSongs.length - 1
                             ? "1px solid #e2e8f0"
                             : undefined,
                         verticalAlign: "middle",
@@ -869,182 +907,7 @@ export default function SongListPage() {
                         paddingBottom: cellPadding + rowSpacing,
                         background: "inherit",
                         borderBottom:
-                          idx < pinnedSongs.length - 1 ||
-                          unpinnedSongs.length > 0
-                            ? "1px solid #e2e8f0"
-                            : undefined,
-                        verticalAlign: "middle",
-                      }}
-                    >
-                      {editMode ? (
-                        <Flex
-                          w="100%"
-                          minW={iconColWidth}
-                          justify="space-between"
-                          align="center"
-                        >
-                          <Box
-                            flex="1"
-                            display="flex"
-                            justifyContent="flex-start"
-                          >
-                            <IconButton
-                              aria-label="Pin"
-                              icon={<FaThumbtack />}
-                              size="xs"
-                              colorScheme={song.pinned ? "red" : "gray"}
-                              variant="ghost"
-                              style={{
-                                color: song.pinned ? "#e53e3e" : "#bbb",
-                                opacity: song.pinned ? 1 : 0.5,
-                                fontSize: "13px",
-                                padding: 0,
-                                minWidth: "16px",
-                                width: "16px",
-                                height: "16px",
-                              }}
-                              onClick={(e) => handlePinSong(song, e)}
-                              mr={0}
-                              tabIndex={0}
-                            />
-                          </Box>
-                          <Box
-                            flex="1"
-                            display="flex"
-                            justifyContent="flex-end"
-                          >
-                            <IconButton
-                              aria-label="Delete"
-                              icon={<DeleteIcon />}
-                              size="xs"
-                              colorScheme="red"
-                              variant="ghost"
-                              style={{
-                                fontSize: "13px",
-                                padding: 0,
-                                minWidth: "16px",
-                                width: "16px",
-                                height: "16px",
-                              }}
-                              onClick={(e) => handleDeleteSong(song, e)}
-                              tabIndex={0}
-                            />
-                          </Box>
-                        </Flex>
-                      ) : (
-                        song.pinned && (
-                          <Box
-                            display="flex"
-                            justifyContent="center"
-                            alignItems="center"
-                            w="16px"
-                            h="16px"
-                            mx="auto"
-                            style={{ fontSize: "12px" }}
-                          >
-                            <FaThumbtack
-                              color="#e53e3e"
-                              size={12}
-                              style={{ opacity: 0.85 }}
-                            />
-                          </Box>
-                        )
-                      )}
-                    </Td>
-                  </Tr>
-                );
-              })}
-              {/* Render unpinned songs như cũ, không có icon kéo */}
-              {unpinnedSongs.map((song, idx) => {
-                if (!songRowRefs.current[song.id]) {
-                  songRowRefs.current[song.id] = React.createRef();
-                }
-                const rowClass = getRowAnimClass(
-                  song.id,
-                  systemTempo ? 60000 / systemTempo : 500
-                );
-                const rowStyle = getRowAnimStyle(song.id);
-                return (
-                  <Tr
-                    key={song.id}
-                    ref={songRowRefs.current[song.id]}
-                    className={rowClass}
-                    style={rowStyle}
-                    onTouchStart={(e) => handleSwipeStart(e, song.id)}
-                    onTouchEnd={(e) => handleSwipeEnd(e, song.id)}
-                    onMouseDown={(e) => handleSwipeStart(e, song.id)}
-                    onMouseUp={(e) => handleSwipeEnd(e, song.id)}
-                  >
-                    {editMode && pinnedSongs.length > 0 && (
-                      <Td /> // giữ cho table align
-                    )}
-                    <Td
-                      style={{
-                        cursor: editMode ? "default" : "pointer",
-                        fontWeight: "bold",
-                        maxWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        paddingLeft: cellPadding,
-                        paddingRight: "2px",
-                        paddingTop: cellPadding + rowSpacing,
-                        paddingBottom: cellPadding + rowSpacing,
-                        fontSize: "1em",
-                        background: "inherit",
-                        borderBottom:
-                          idx < unpinnedSongs.length - 1
-                            ? "1px solid #e2e8f0"
-                            : undefined,
-                        verticalAlign: "middle",
-                      }}
-                      onClick={() => handleRowClick(song)}
-                      title={song.name}
-                    >
-                      {song.name}
-                      {systemSongId === song.id && (
-                        <span
-                          style={{ marginLeft: 6 }}
-                          title="Đang đồng bộ hệ thống"
-                        >
-                          🔗
-                        </span>
-                      )}
-                    </Td>
-                    <Td
-                      textAlign="center"
-                      style={{
-                        cursor: editMode ? "default" : "pointer",
-                        fontWeight: "bold",
-                        color: systemSongId === song.id ? "teal" : undefined,
-                        paddingLeft: "2px",
-                        paddingRight: "2px",
-                        paddingTop: cellPadding + rowSpacing,
-                        paddingBottom: cellPadding + rowSpacing,
-                        fontSize: "1em",
-                        background: "inherit",
-                        borderBottom:
-                          idx < unpinnedSongs.length - 1
-                            ? "1px solid #e2e8f0"
-                            : undefined,
-                        verticalAlign: "middle",
-                      }}
-                      onClick={() => handleTempoClick(song)}
-                    >
-                      {song.tempo || 120}
-                      {systemSongId === song.id && (
-                        <span style={{ marginLeft: 8 }}>🔊</span>
-                      )}
-                    </Td>
-                    <Td
-                      textAlign="center"
-                      p={0}
-                      style={{
-                        paddingTop: cellPadding + rowSpacing,
-                        paddingBottom: cellPadding + rowSpacing,
-                        background: "inherit",
-                        borderBottom:
-                          idx < unpinnedSongs.length - 1
+                          idx < sortedSongs.length - 1
                             ? "1px solid #e2e8f0"
                             : undefined,
                         verticalAlign: "middle",
@@ -1130,9 +993,8 @@ export default function SongListPage() {
               })}
               {sortedSongs.length > 0 && (
                 <Tr>
-                  {editMode && pinnedSongs.length > 0 && <Td />}
                   <Td
-                    colSpan={editMode && pinnedSongs.length > 0 ? 3 : 2}
+                    colSpan={editMode ? 4 : 3}
                     textAlign="center"
                     fontWeight="bold"
                     color="gray.600"
