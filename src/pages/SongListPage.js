@@ -43,34 +43,66 @@ import SongDetailModal from "../components/SongDetailModal";
 import useMetronomeScheduler from "../components/MetronomeScheduler";
 import "./SongListPage.css";
 
-const seedSongs = async () => {
-  for (const song of songsSeed) {
-    await addDoc(collection(db, "songs"), song);
-  }
-  alert("Seed xong!");
-};
-
-const MAX_TICKS = 16;
-const SYSTEM_STATE_DOC = "currentSong";
+function removeAccents(str) {
+  return (str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
 
 function getAcronym(str) {
   return (str || "")
     .split(/\s+/)
-    .map((w) => (w[0] || "").toUpperCase())
+    .map((w) => (w[0] || "").toLowerCase())
     .join("");
 }
 
-const MIN_SWIPE_DISTANCE = 50; // px
+function isAcronymMatch(songName, search) {
+  const songAcr = getAcronym(removeAccents(songName));
+  const searchAcr = search.toLowerCase();
+  return songAcr.startsWith(searchAcr);
+}
+
+function isMultiWordMatch(songName, search) {
+  const nameWords = removeAccents(songName)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const searchWords = search.toLowerCase().split(/\s+/).filter(Boolean);
+  let idx = 0;
+  for (let i = 0; i < searchWords.length; ++i) {
+    let found = false;
+    while (idx < nameWords.length) {
+      if (nameWords[idx].startsWith(searchWords[i])) {
+        found = true;
+        ++idx;
+        break;
+      }
+      ++idx;
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+// NEW: Allow partial match for single term, so "mat" matches "Mặt trời không lặn"
+function isPartialSingleWordMatch(songName, search) {
+  const nameWords = removeAccents(songName)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const searchStr = search.toLowerCase();
+  return nameWords.some((w) => w.startsWith(searchStr));
+}
+
+const MIN_SWIPE_DISTANCE = 50;
 
 export default function SongListPage() {
   const [songs, setSongs] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // State đồng bộ từ Firestore
   const [systemSongId, setSystemSongId] = useState(null);
   const [systemTempo, setSystemTempo] = useState(null);
-
-  // State cho animation, modal, tìm kiếm, edit mode, swipe
   const [modalSong, setModalSong] = useState(null);
   const [rowAnimState, setRowAnimState] = useState({});
   const fadeTimeouts = useRef({});
@@ -80,20 +112,13 @@ export default function SongListPage() {
   const [editMode, setEditMode] = useState(false);
   const swipeStartXRef = useRef(null);
   const swipeActiveRowRef = useRef(null);
-
-  // Drag state for pinned songs
   const [draggedPinIdx, setDraggedPinIdx] = useState(null);
   const [dragOverPinIdx, setDragOverPinIdx] = useState(null);
   const [pinnedSongsOrder, setPinnedSongsOrder] = useState(null);
-
-  // unlock audio context
   const audioUnlockRef = useRef();
   const [showAudioPopup, setShowAudioPopup] = useState(true);
-
-  // toast
   const toast = useToast();
 
-  // Responsive tweaks
   const toolbarPadding = useBreakpointValue({
     base: "6px 2px 6px 2px",
     md: "10px 12px 8px 12px",
@@ -123,7 +148,6 @@ export default function SongListPage() {
     base: "31vw",
     md: "140px",
   });
-
   const nameColWidth = useBreakpointValue({
     base: "56vw",
     md: "180px",
@@ -155,25 +179,17 @@ export default function SongListPage() {
     lg: "12px",
   });
 
-  // Metronome scheduler - log các sự kiện callback
   const { ensureAudioReady, testTick } = useMetronomeScheduler({
     bpm: systemTempo,
     isActive: !!systemSongId,
     onTick: useCallback(() => {
-      console.log(
-        "[SongListPage] onTick called. systemSongId:",
-        systemSongId,
-        "systemTempo:",
-        systemTempo
-      );
       if (!systemSongId) return;
       const msPerTick = systemTempo ? 60000 / systemTempo : 500;
       startRowAnim(systemSongId, msPerTick);
     }, [systemSongId, systemTempo]),
     onStop: useCallback(() => {
-      console.log("[SongListPage] onStop called. systemSongId:", systemSongId);
       if (systemSongId) {
-        const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
+        const systemStateRef = doc(db, "systemState", "currentSong");
         setDoc(systemStateRef, {});
         setSystemSongId(null);
         setSystemTempo(null);
@@ -185,10 +201,8 @@ export default function SongListPage() {
     if (systemSongId && systemTempo) {
       ensureAudioReady();
     }
-    // eslint-disable-next-line
-  }, [systemSongId, systemTempo]);
+  }, [systemSongId, systemTempo, ensureAudioReady]);
 
-  // Animation logic using CSS className and transition-duration
   function startRowAnim(rowId, msPerTick) {
     if (rowId !== systemSongId) return;
     if (fadeTimeouts.current[rowId]) {
@@ -214,7 +228,6 @@ export default function SongListPage() {
 
   const handleCloseAudioPopup = () => setShowAudioPopup(false);
 
-  // SỬA: Bấm "Cho phép" chỉ play audio element như cũ (giữ lại cho UX cũ)
   const handlePlayAudioAllow = async () => {
     if (audioUnlockRef.current) {
       try {
@@ -224,13 +237,17 @@ export default function SongListPage() {
     setShowAudioPopup(false);
   };
 
-  // SỬA: Bấm "Bật tiếng" sẽ gọi testTick() để phát tick bằng Web Audio API
   const handlePlayAudioUnlock = async () => {
     await ensureAudioReady();
     await testTick();
+    // Nếu đang có bài được chọn, force lại tick + anim
+    if (systemSongId && systemTempo) {
+      const msPerTick = systemTempo ? 60000 / systemTempo : 500;
+      startRowAnim(systemSongId, msPerTick);
+      // Gọi onTick() nếu metronome scheduler có exposed API, hoặc tự phát tick đầu
+    }
   };
 
-  // Fetch songs list
   useEffect(() => {
     const fetchSongs = async () => {
       setLoading(true);
@@ -245,12 +262,10 @@ export default function SongListPage() {
     fetchSongs();
   }, []);
 
-  // LẮNG NGHE state đồng bộ từ Firestore
   useEffect(() => {
-    const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
+    const systemStateRef = doc(db, "systemState", "currentSong");
     const unsubscribe = onSnapshot(systemStateRef, (snap) => {
       const data = snap.data();
-      console.log("[SongListPage] Firestore snapshot", data);
       if (data && data.songId) {
         setSystemSongId(data.songId);
         setSystemTempo(data.tempo || 120);
@@ -262,7 +277,6 @@ export default function SongListPage() {
     return () => unsubscribe();
   }, []);
 
-  // Scroll tới bài đang được chọn (theo Firestore)
   useEffect(() => {
     if (!systemSongId) return;
     setTimeout(() => {
@@ -285,7 +299,6 @@ export default function SongListPage() {
     }, 350);
   }, [systemSongId, songs.length]);
 
-  // Vuốt sang trái/phải để mở/tắt edit mode
   const handleSwipeStart = (e, songId) => {
     let x = null;
     if (e.touches && e.touches.length > 0) {
@@ -331,14 +344,17 @@ export default function SongListPage() {
 
   const filteredSongs = songs.filter((song) => {
     if (!search.trim()) return true;
-    const lower = search.trim().toLowerCase();
-    return (
-      (song.name || "").toLowerCase().includes(lower) ||
-      getAcronym(song.name).toLowerCase().startsWith(lower)
-    );
+    const searchStr = removeAccents(search.trim().toLowerCase());
+    if (!searchStr) return true;
+    if (!song.name) return false;
+    if (searchStr.indexOf(" ") >= 0) {
+      return isMultiWordMatch(song.name, searchStr);
+    }
+    // Nếu search là 1 từ, match bất kỳ từ nào bắt đầu bằng searchStr
+    if (isPartialSingleWordMatch(song.name, searchStr)) return true;
+    return isAcronymMatch(song.name, searchStr);
   });
 
-  // Tách pinned và non-pinned, có thể reorder pinned
   const pinnedSongs = filteredSongs
     .filter((s) => s.pinned)
     .sort((a, b) => {
@@ -356,7 +372,6 @@ export default function SongListPage() {
       })
     );
 
-  // Sắp xếp pinnedSongs theo thứ tự kéo thả tạm thời (nếu có)
   const orderedPinnedSongs =
     pinnedSongsOrder && pinnedSongsOrder.length === pinnedSongs.length
       ? pinnedSongsOrder
@@ -366,20 +381,6 @@ export default function SongListPage() {
 
   const sortedSongs = [...orderedPinnedSongs, ...nonPinnedSongs];
 
-  // Khi state đồng bộ đổi: reset animation, luôn play metronome nếu có bài được chọn
-  useEffect(() => {
-    Object.values(fadeTimeouts.current).flat().forEach(clearTimeout);
-    fadeTimeouts.current = {};
-    setRowAnimState({});
-    // Trigger 1 tick animation ngay
-    if (systemSongId && systemTempo) {
-      startRowAnim(systemSongId, 60000 / systemTempo);
-    } else if (systemSongId) {
-      startRowAnim(systemSongId, 500);
-    }
-  }, [systemSongId, systemTempo]);
-
-  // Drag & drop handlers for pinned songs
   function handleDragStartPin(idx, e) {
     setDraggedPinIdx(idx);
     setDragOverPinIdx(idx);
@@ -397,23 +398,19 @@ export default function SongListPage() {
       setDragOverPinIdx(null);
       return;
     }
-    // Đổi thứ tự tạm thời
     const newOrder = [...orderedPinnedSongs];
     const [removed] = newOrder.splice(draggedPinIdx, 1);
     newOrder.splice(idx, 0, removed);
     setPinnedSongsOrder(newOrder.map((s) => s.id));
     setDraggedPinIdx(null);
     setDragOverPinIdx(null);
-    // Lưu vào firestore
     setTimeout(() => {
       const now = Date.now();
       const batch = writeBatch(db);
       newOrder.forEach((song, i) => {
-        // pinnedAt đảm bảo lệch nhau một chút để đúng thứ tự
         batch.update(doc(db, "songs", song.id), { pinnedAt: now + i });
       });
       batch.commit();
-      // Cập nhật lại local
       setSongs((prev) =>
         prev.map((s) =>
           s.pinned
@@ -436,7 +433,6 @@ export default function SongListPage() {
     setPinnedSongsOrder(null);
   }
 
-  // Các hàm thao tác dữ liệu
   const handlePinSong = async (song, e) => {
     e.stopPropagation();
     if (song.pinned) {
@@ -482,11 +478,10 @@ export default function SongListPage() {
     });
   };
 
-  // GHI vào Firestore, mọi máy đều chạy metronome qua state Firestore
   const handleTempoClick = async (song) => {
     if (editMode) return;
     await ensureAudioReady();
-    const systemStateRef = doc(db, "systemState", SYSTEM_STATE_DOC);
+    const systemStateRef = doc(db, "systemState", "currentSong");
     setRowAnimState({});
     if (systemSongId === song.id) {
       await setDoc(systemStateRef, {});
@@ -686,7 +681,6 @@ export default function SongListPage() {
             }}
           >
             <colgroup>
-              {/* Thêm cột move icon khi editMode và là pinned song */}
               {editMode ? (
                 <col
                   style={{
@@ -712,7 +706,6 @@ export default function SongListPage() {
             </colgroup>
             <Thead>
               <Tr>
-                {/* Thêm th cột move khi editMode */}
                 {editMode ? (
                   <Th
                     p={cellPadding}
@@ -755,9 +748,7 @@ export default function SongListPage() {
                   systemTempo ? 60000 / systemTempo : 500
                 );
                 const rowStyle = getRowAnimStyle(song.id);
-                // Xác định là pinned và editMode
                 const isPinned = song.pinned;
-                // Tìm index trong orderedPinnedSongs (để drag)
                 const pinIdx = isPinned
                   ? orderedPinnedSongs.findIndex((s) => s.id === song.id)
                   : -1;
@@ -804,7 +795,6 @@ export default function SongListPage() {
                       editMode && isPinned ? handleDragEndPin : undefined
                     }
                   >
-                    {/* Move icon - chỉ cho pinned và editMode */}
                     {editMode ? (
                       <Td
                         p={0}
