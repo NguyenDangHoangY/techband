@@ -531,7 +531,7 @@ export default function SongListPage() {
 
   return (
     <Box maxW="600px" mx="auto" p={{ base: 1, md: 2 }}>
-      <Modal isOpen={showAudioPopup} onClose={handleCloseAudioPopup} isCentered>
+      {/* <Modal isOpen={showAudioPopup} onClose={handleCloseAudioPopup} isCentered>
         <ModalOverlay />
         <ModalContent maxW="340px">
           <ModalHeader fontSize="lg" fontWeight="bold" textAlign="center">
@@ -574,7 +574,7 @@ export default function SongListPage() {
             </Button>
           </ModalFooter>
         </ModalContent>
-      </Modal>
+      </Modal> */}
       <Box
         position="sticky"
         top={0}
@@ -628,7 +628,7 @@ export default function SongListPage() {
             maxW={buttonMaxW}
             height={buttonHeight}
             fontSize={buttonFontSize}
-            onClick={handlePlayAudioUnlock}
+            onClick={(handlePlayAudioUnlock, handlePlayAudioAllow)}
             ml={{ base: 1, md: 2 }}
             mr={{ base: 1, md: 2 }}
             px={{ base: 2, md: 4 }}
