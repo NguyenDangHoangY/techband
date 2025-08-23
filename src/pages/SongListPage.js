@@ -230,6 +230,7 @@ export default function SongListPage() {
 
   const handlePlayAudioAllow = async () => {
     if (audioUnlockRef.current) {
+      // audioUnlockRef.current.volume = 0.01;
       try {
         await audioUnlockRef.current.play();
       } catch (e) {}
@@ -238,6 +239,7 @@ export default function SongListPage() {
   };
 
   const handlePlayAudioUnlock = async () => {
+    audioUnlockRef.current.play();
     await ensureAudioReady();
     await testTick();
     // Nếu đang có bài được chọn, force lại tick + anim
@@ -605,6 +607,7 @@ export default function SongListPage() {
               borderRadius="lg"
               bg="white"
               border="1px solid #c6e0f5"
+              onClick={handlePlayAudioAllow}
             />
             {search && (
               <InputRightElement width="2.2em">
@@ -628,7 +631,16 @@ export default function SongListPage() {
             maxW={buttonMaxW}
             height={buttonHeight}
             fontSize={buttonFontSize}
-            onClick={(handlePlayAudioUnlock, handlePlayAudioAllow)}
+            onClick={handlePlayAudioUnlock}
+            // onClick={async () => {
+            //   // if (audioUnlockRef.current) {
+            //   //   audioUnlockRef.current.volume = 0.001;
+            //   // }
+            //   // handlePlayAudioAllow();
+            //   // handlePlayAudioUnlock();
+            //   audioUnlockRef.current.play();
+            //   // handleTempoClick(song);
+            // }}
             ml={{ base: 1, md: 2 }}
             mr={{ base: 1, md: 2 }}
             px={{ base: 2, md: 4 }}
@@ -656,7 +668,7 @@ export default function SongListPage() {
       </Box>
       <audio
         ref={audioUnlockRef}
-        src="/tick.wav"
+        src="/slient.wav"
         preload="auto"
         style={{
           width: 0,
@@ -882,7 +894,19 @@ export default function SongListPage() {
                             : undefined,
                         verticalAlign: "middle",
                       }}
-                      onClick={() => handleTempoClick(song)}
+                      // onClick={
+                      //   () => handleTempoClick(song)
+                      //   // handlePlayAudioAllow
+                      // }
+                      onClick={async () => {
+                        // if (audioUnlockRef.current) {
+                        //   audioUnlockRef.current.volume = 0.001;
+                        // }
+                        // handlePlayAudioAllow();
+                        // handlePlayAudioUnlock();
+                        audioUnlockRef.current.play();
+                        handleTempoClick(song);
+                      }}
                     >
                       {song.tempo || 120}
                       {systemSongId === song.id && (
